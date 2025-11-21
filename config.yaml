@@ -1,0 +1,55 @@
+# reproducibility
+seed: 42
+
+# paths
+# data_path: /data/projects/Pose/AMASS
+data_path: /data/projects/Pose/processed_50fps
+smpl_file: models/SMPL_male.pkl
+
+
+# settings
+use_global_pose: true
+window_length: 300
+
+
+# datasets
+train_datasets:
+  - ACCAD
+  - BioMotionLab_NTroje
+  - BMLhandball
+  - BMLmovi
+  - CMU
+  - DanceDB
+  - DFaust_67
+  - EKUT
+  - Eyes_Japan_Dataset
+  - HUMAN4D
+  - HumanEva
+  - KIT
+  - MPI_HDM05
+  - MPI_Limits
+  - MPI_mosh
+  - SFU
+  - SSM_synced
+  - TCD_handMocap
+  - TotalCapture
+  - Transitions_mocap
+
+test_datasets:
+  - 'IMUPoser'
+  - 'DIP'
+  - 'TotalCapture'
+
+
+# scales
+fps: 50
+acc_scale: 30
+vel_scale: 3
+   
+
+# training
+batch_size: 128
+num_epochs: 200
+learning_rate: 0.0001
+num_workers: 0
+dropout: 0.2
