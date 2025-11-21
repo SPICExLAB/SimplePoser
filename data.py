@@ -11,7 +11,7 @@ from tqdm import tqdm
 from pathlib import Path
 
 import articulate as art
-from config import combos
+from config import combos, paths, acc_scale, vel_scale, fps
 from utils import load_yaml
 
 
@@ -22,7 +22,7 @@ class PoseDataset(Dataset):
         self.fold = fold
         self.evaluate = evaluate
         self.combos = combos
-        self.bodymodel = art.model.ParametricModel(cfg['smpl_file'])
+        self.bodymodel = art.model.ParametricModel(paths.smpl_file)
 
         self.data = {
             'imu_inputs': [],
@@ -35,12 +35,13 @@ class PoseDataset(Dataset):
 
         self._load_data()
 
-    def _get_data_files(self, data_folder: str):
+    def _get_data_files(self, data_folder: Path):
+        print(f"Getting data files from {data_folder}...")
         return [x.name for x in data_folder.iterdir() if not x.is_dir()]
 
     def _load_data(self):
         # load data files
-        data_folder = Path(self.cfg['data_path'])
+        data_folder = Path(paths.amass_dir)
         data_files = self._get_data_files(data_folder)
 
         # process each data file
@@ -54,7 +55,7 @@ class PoseDataset(Dataset):
         foots = file_data.get('contact', [None] * len(poses))
         
         for idx, (acc, ori, pose, tran, joint, foot) in enumerate(zip(accs, oris, poses, trans, joints, foots)):
-            acc = acc[:, :5] / self.cfg['acc_scale']  # (N, 5, 3), scale the acc to be in range [-1, 1]
+            acc = acc[:, :5] / acc_scale  # (N, 5, 3), scale the acc to be in range [-1, 1]
             ori = ori[:, :5]                          # (N, 5, 3, 3)
             pose = pose.view(-1, 24, 3, 3)            # (N, 24, 3, 3)
 
@@ -93,7 +94,7 @@ class PoseDataset(Dataset):
             root_vel = torch.cat([torch.zeros(1, 3), tran[1:] - tran[:-1]])
             vel = torch.cat([torch.zeros(1, 24, 3), torch.diff(joint, dim=0)])
             vel[:, 0] = root_vel
-            vel = vel * (self.cfg['fps'] / self.cfg['vel_scale'])
+            vel = vel * (fps / vel_scale)
             
             self.data['vel_outputs'].extend(torch.split(vel, window))
             self.data['foot_outputs'].extend(torch.split(foot, window))

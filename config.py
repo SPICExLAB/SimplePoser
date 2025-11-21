@@ -34,7 +34,8 @@ combos = {
 
 class paths:
     raw_amass_dir = '/data/projects/Pose/raw/AMASS'      # raw AMASS dataset path (raw_amass_dir/ACCAD/ACCAD/s001/*.npz)
-    amass_dir = '/data/projects/Pose/AMASS'         # output path for the synthetic AMASS dataset
+    # amass_dir = '/data/projects/Pose/AMASS'              # output path for the synthetic AMASS dataset
+    amass_dir = '/data/projects/Pose/processed_25fps'              # output path for the synthetic AMASS dataset
 
     raw_dipimu_dir = 'data/dataset_raw/DIP_IMU'   # raw DIP-IMU dataset path (raw_dipimu_dir/s_01/*.pkl)
     dipimu_dir = 'data/dataset_work/DIP_IMU'      # output path for the preprocessed DIP-IMU dataset
@@ -51,12 +52,14 @@ class paths:
 
 class joint_set:
     leaf = [7, 8, 12, 20, 21]
-    full = list(range(1, 24))
-    reduced = [1, 2, 3, 4, 5, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19]
+    full = list(range(0, 24))
+    reduced = [0, 1, 2, 3, 4, 5, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19]
     ignored = [0, 7, 8, 10, 11, 20, 21, 22, 23]
 
     lower_body = [0, 1, 2, 4, 5, 7, 8, 10, 11]
     lower_body_parent = [None, 0, 0, 1, 2, 3, 4, 5, 6]
+
+    n_imu =  5 * (3 + 9) # 5 sensors * (3 acc + 9 ori)
 
     n_leaf = len(leaf)
     n_full = len(full)
@@ -64,5 +67,7 @@ class joint_set:
     n_ignored = len(ignored)
 
 
+fps = 50
 acc_scale = 30
 vel_scale = 3
+gravity_velocity = -0.018
