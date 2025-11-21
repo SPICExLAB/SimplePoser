@@ -11,7 +11,7 @@ from tqdm import tqdm
 from pathlib import Path
 
 import articulate as art
-from config import combos, paths, acc_scale, vel_scale, fps
+from config import combos, paths, acc_scale, vel_scale, fps, joint_set
 from utils import load_yaml
 
 
@@ -36,12 +36,15 @@ class PoseDataset(Dataset):
         self._load_data()
 
     def _get_data_files(self, data_folder: Path):
-        print(f"Getting data files from {data_folder}...")
-        return [x.name for x in data_folder.iterdir() if not x.is_dir()]
+        return [x.name for x in data_folder.iterdir() if not x.is_dir() and 'imuposer_test' in x.name]
 
     def _load_data(self):
         # load data files
-        data_folder = Path(paths.amass_dir)
+        if self.evaluate:
+            data_folder = Path(paths.imuposer_dir)
+        else:
+            data_folder = Path(paths.amass_dir)
+
         data_files = self._get_data_files(data_folder)
 
         # process each data file
@@ -60,13 +63,13 @@ class PoseDataset(Dataset):
             pose = pose.view(-1, 24, 3, 3)            # (N, 24, 3, 3)
 
             pose_global, joint = self.bodymodel.forward_kinematics(pose=pose) 
-            if self.cfg['use_global_pose']:
+            if self.cfg['use_global_pose'] and not self.evaluate:
                 # use global pose for training 
                 pose = pose_global
 
-            joint = joint.view(-1, 24, 3)             # (N, 24, 3)
-            tran = tran.view(-1, 3)                   # (N, 3)
-            foot = foot.view(-1, 2)                   # (N, 2)
+            joint = joint.view(-1, 24, 3)              # (N, 24, 3)
+            tran = tran.view(-1, 3)                    # (N, 3)
+            foot = foot.view(-1, 2) if foot else None  # (N, 2)
 
             self._process_data(acc, ori, pose, joint, tran, foot)
 
@@ -96,8 +99,9 @@ class PoseDataset(Dataset):
             vel[:, 0] = root_vel
             vel = vel * (fps / vel_scale)
             
-            self.data['vel_outputs'].extend(torch.split(vel, window))
-            self.data['foot_outputs'].extend(torch.split(foot, window))
+            if not self.evaluate: # not necessary nor available for some datasets
+                self.data['vel_outputs'].extend(torch.split(vel, window))
+                self.data['foot_outputs'].extend(torch.split(foot, window))
 
     def __len__(self):
         return len(self.data['imu_inputs'])            
@@ -111,8 +115,8 @@ class PoseDataset(Dataset):
         
         # convert pose rotations to 6D representation
         pose_6d = art.math.rotation_matrix_to_r6d(self.data['pose_outputs'][idx])
-        n_joints = len(self.cfg['pred_joints_set'])
-        pose_6d = pose_6d.reshape(-1, n_joints, 6)[:, self.cfg['pred_joints_set']].reshape(-1, 6 * n_joints)
+        n_joints = len(joint_set.full)
+        pose_6d = pose_6d.reshape(-1, n_joints, 6)[:, joint_set.full].reshape(-1, 6 * n_joints)
         
         return imu, pose_6d, joint, tran, vel, contact            
 
@@ -163,8 +167,3 @@ class PoseDataModule(L.LightningDataModule):
         return DataLoader(self.test_data, batch_size=self.cfg['batch_size'],
                          collate_fn=collate_fn, num_workers=self.cfg.test.num_workers,
                          shuffle=False, drop_last=False)
-
-
-if __name__ == "__main__":
-    cfg = load_yaml('config.yaml')
-    dataset = PoseDataset(cfg, fold='train')

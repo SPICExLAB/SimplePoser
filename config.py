@@ -13,7 +13,7 @@ amass_data = ['ACCAD', 'BioMotionLab_NTroje', 'BMLhandball', 'BMLmovi', 'CMU',
 
 # device-location combinations
 combos = {
-    # 'global': [0, 1, 2, 3, 4],
+    'global': [0, 1, 2, 3, 4],
     # 'lw_rp_h': [0, 3, 4],
     # 'rw_rp_h': [1, 3, 4],
     # 'lw_lp_h': [0, 2, 4],
@@ -28,7 +28,7 @@ combos = {
     # 'lp_h': [2, 4],
     # 'rp_h': [3, 4],
     # 'lp': [2],
-    'rp': [3],
+    # 'rp': [3],
 }                    
 
 
@@ -44,6 +44,8 @@ class paths:
     raw_totalcapture_dip_dir = 'data/dataset_raw/TotalCapture/DIP_recalculate'  # contain ground-truth SMPL pose (*.pkl)
     raw_totalcapture_official_dir = 'data/dataset_raw/TotalCapture/official'    # contain official gt (S1/acting1/gt_skel_gbl_pos.txt)
     totalcapture_dir = 'data/dataset_work/TotalCapture'          # output path for the preprocessed TotalCapture dataset
+
+    imuposer_dir = '/data/datasets/pose/eval/'          # output path for the preprocessed IMUPoser dataset
 
     example_dir = 'data/example'                    # example IMU measurements
     smpl_file = 'models/SMPL_male.pkl'              # official SMPL model path

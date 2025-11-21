@@ -8,7 +8,7 @@ from torch.nn.functional import relu
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 import articulate as art
-from config import joint_set, gravity_velocity, paths
+from config import joint_set, gravity_velocity, paths, fps, vel_scale
 
 
 class RNN(torch.nn.Module):
@@ -140,7 +140,7 @@ class MobilePoser(nn.Module):
     def from_pretrained(cls, cfg, model_path):
         """Load pretrained model."""
         model = cls(cfg)
-        model.load_state_dict(torch.load(model_path, map_location=cfg['device'], weights_only=False))
+        model.load_state_dict(torch.load(model_path, map_location=cfg['device'], weights_only=True))
         return model
 
     def reset(self):
@@ -237,7 +237,7 @@ class MobilePoser(nn.Module):
         
         # velocity from network-based estimation
         root_vel = vel[:, 0]  # [T, 3]
-        pred_vel = root_vel / (self.cfg['fps'] / self.cfg['vel_scale'])
+        pred_vel = root_vel / (fps / vel_scale)
         
         # compute velocity as weighted combination of network-based and foot-contact-based
         weight = self._prob_to_weight(contact.max(dim=1).values.sigmoid()).view(-1, 1)
@@ -287,7 +287,7 @@ class MobilePoser(nn.Module):
             contact_vel = self.last_rfoot_pos - rfoot_pos + self.gravity_velocity
         
         # velocity from network-based estimation
-        root_vel = vel[0] / (self.cfg['fps'] / self.cfg['vel_scale'])  # root joint velocity
+        root_vel = vel[0] / (fps / vel_scale)  # root joint velocity
         weight = self._prob_to_weight(contact.max())
         velocity = art.math.lerp(root_vel, contact_vel, weight)
         

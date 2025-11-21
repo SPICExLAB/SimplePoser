@@ -15,5 +15,5 @@ future_frames: 5
 total_frames: past_frames + future_frames
 
 # settings
-use_global_pose: true
+use_global_pose: false
 window_length: 300
