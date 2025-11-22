@@ -34,10 +34,10 @@ combos = {
 
 class paths:
     raw_amass_dir = '/data/projects/Pose/raw/AMASS'      # raw AMASS dataset path (raw_amass_dir/ACCAD/ACCAD/s001/*.npz)
-    amass_dir = '/data/projects/Pose/dataset_work/SCRATCH'              # output path for the synthetic AMASS dataset
+    amass_dir = '/data/projects/Pose/dataset_work/AMASS'              # output path for the synthetic AMASS dataset
 
     raw_dipimu_dir = '/data/projects/Pose/raw/DIP_IMU'   # raw DIP-IMU dataset path (raw_dipimu_dir/s_01/*.pkl)
-    dipimu_dir = '/data/projects/Pose/dataset_work/SCRATCH'     # output path for the preprocessed DIP-IMU dataset
+    dipimu_dir = '/data/projects/Pose/dataset_work/DIP_IMU'     # output path for the preprocessed DIP-IMU dataset
 
     # DIP recalculates the SMPL poses for TotalCapture dataset. You should acquire the pose data from the DIP website.
     raw_totalcapture_dip_dir = 'data/dataset_raw/TotalCapture/DIP_recalculate'  # contain ground-truth SMPL pose (*.pkl)

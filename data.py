@@ -61,9 +61,6 @@ class PoseDataset(Dataset):
             ori = ori[:, :5]                          # (N, 5, 3, 3)
             pose = pose.view(-1, 24, 3, 3)            # (N, 24, 3, 3)
 
-            if idx > 1:
-                break
-
             pose_global, joint = self.bodymodel.forward_kinematics(pose=pose) 
             if self.cfg['use_global_pose'] and not self.evaluate:
                 # use global pose for training 
