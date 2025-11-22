@@ -32,8 +32,17 @@ def process_amass(smooth_n=4):
                  for i in range(0, v.shape[0] - smooth_n * 2)])
         return acc
 
-    # vi_mask = torch.tensor([1961, 5424, 1176, 4662, 411, 3021])
-    # ji_mask = torch.tensor([18, 19, 4, 5, 15, 0])
+    def _foot_ground_probs(joint):
+        r"""
+        Compute foot-ground contact probabilities.
+        """
+        dist_lfeet = torch.norm(joint[1:, 10] - joint[:-1, 10], dim=1)
+        dist_rfeet = torch.norm(joint[1:, 11] - joint[:-1, 11], dim=1)
+        lfoot_contact = (dist_lfeet < 0.008).int()
+        rfoot_contact = (dist_rfeet < 0.008).int()
+        lfoot_contact = torch.cat((torch.zeros(1, dtype=torch.int), lfoot_contact))
+        rfoot_contact = torch.cat((torch.zeros(1, dtype=torch.int), rfoot_contact))
+        return torch.stack((lfoot_contact, rfoot_contact), dim=1)        
 
     # left wrist, right wrist, left thigh, right thigh, head, pelvis
     vi_mask = torch.tensor([1961, 5424, 876, 4362, 411, 3021])
@@ -74,36 +83,46 @@ def process_amass(smooth_n=4):
 
     print('Synthesizing IMU accelerations and orientations')
     b = 0
-    out_pose, out_shape, out_tran, out_joint, out_vrot, out_vacc = [], [], [], [], [], []
+    out_pose, out_shape, out_tran, out_joint, out_vrot, out_vacc, out_contact = [], [], [], [], [], [], []
     for i, l in tqdm(list(enumerate(length))):
         if l <= 12: b += l; print('\tdiscard one sequence with length', l); continue
         p = art.math.axis_angle_to_rotation_matrix(pose[b:b + l]).view(-1, 24, 3, 3)
         grot, joint, vert = body_model.forward_kinematics(p, shape[i], tran[b:b + l], calc_mesh=True)
-        out_pose.append(pose[b:b + l].clone())  # N, 24, 3
+        out_pose.append(p.clone())  # N, 24, 3, 3
         out_tran.append(tran[b:b + l].clone())  # N, 3
         out_shape.append(shape[i].clone())  # 10
         out_joint.append(joint[:, :24].contiguous().clone())  # N, 24, 3
         out_vacc.append(_syn_acc(vert[:, vi_mask]))  # N, 6, 3
         out_vrot.append(grot[:, ji_mask])  # N, 6, 3, 3
+        out_contact.append(_foot_ground_probs(joint).clone())  # N, 2
         b += l
 
     print('Saving')
-    os.makedirs(paths.amass_dir, exist_ok=True)
-    torch.save(out_pose, os.path.join(paths.amass_dir, 'pose.pt'))
-    torch.save(out_shape, os.path.join(paths.amass_dir, 'shape.pt'))
-    torch.save(out_tran, os.path.join(paths.amass_dir, 'tran.pt'))
-    torch.save(out_joint, os.path.join(paths.amass_dir, 'joint.pt'))
-    torch.save(out_vrot, os.path.join(paths.amass_dir, 'vrot.pt'))
-    torch.save(out_vacc, os.path.join(paths.amass_dir, 'vacc.pt'))
+    data = {
+        'joint': out_joint,
+        'pose': out_pose,
+        'shape': out_shape,
+        'tran': out_tran,
+        'acc': out_vacc,
+        'ori': out_vrot,
+        'contact': out_contact
+    }
+    torch.save(data, os.path.join(paths.amass_dir, 'AMASS.pt'))
     print('Synthetic AMASS dataset is saved at', paths.amass_dir)
 
 
-def process_dipimu():
-    imu_mask = [7, 8, 11, 12, 0, 2]
-    test_split = ['s_09', 's_10']
-    accs, oris, poses, trans = [], [], [], []
+def process_dipimu(split='train'):
+    imu_mask = [7, 8, 9, 10, 0, 2]
 
-    for subject_name in test_split:
+    train_split = ['s_01', 's_02', 's_03', 's_04', 's_05', 's_06', 's_07', 's_08']
+    test_split = ['s_09', 's_10']
+    subjects = train_split if split == "train" else test_split
+
+    accs, oris, poses, trans, joints, shapes = [], [], [], [], [], []
+
+    body_model = art.ParametricModel(paths.smpl_file)
+
+    for subject_name in subjects:
         for motion_name in os.listdir(os.path.join(paths.raw_dipimu_dir, subject_name)):
             path = os.path.join(paths.raw_dipimu_dir, subject_name, motion_name)
             data = pickle.load(open(path, 'rb'), encoding='latin1')
@@ -119,17 +138,34 @@ def process_dipimu():
                 ori[:-1].masked_scatter_(torch.isnan(ori[:-1]), ori[1:][torch.isnan(ori[:-1])])
 
             acc, ori, pose = acc[6:-6], ori[6:-6], pose[6:-6]
+            shape = torch.zeros(10)
+            tran = torch.zeros(pose.shape[0], 3)
             if torch.isnan(acc).sum() == 0 and torch.isnan(ori).sum() == 0 and torch.isnan(pose).sum() == 0:
+                # forward kinematics to get the joint position
+                pose = art.math.axis_angle_to_rotation_matrix(pose).reshape(-1, 24, 3, 3)
+                _, joint, _ = body_model.forward_kinematics(pose, shape, tran, calc_mesh=True)
+
                 accs.append(acc.clone())
                 oris.append(ori.clone())
                 poses.append(pose.clone())
-                trans.append(torch.zeros(pose.shape[0], 3))  # dip-imu does not contain translations
+                trans.append(tran.clone())  # dip-imu does not contain translations
+                shapes.append(shape.clone())
+                joints.append(joint.clone())
             else:
                 print('DIP-IMU: %s/%s has too much nan! Discard!' % (subject_name, motion_name))
 
+    print('Saving')
     os.makedirs(paths.dipimu_dir, exist_ok=True)
-    torch.save({'acc': accs, 'ori': oris, 'pose': poses, 'tran': trans}, os.path.join(paths.dipimu_dir, 'test.pt'))
-    print('Preprocessed DIP-IMU dataset is saved at', paths.dipimu_dir)
+    data = {
+        'pose': poses,
+        'tran': trans,
+        'acc': accs,
+        'ori': oris,
+        'joint': joints,
+        'shape': shapes,
+    }
+    torch.save(data, os.path.join(paths.dipimu_dir, f'DIP_{split}.pt'))
+    print(f'Preprocessed DIP-IMU {split} dataset is saved at', paths.dipimu_dir)
 
 
 def process_totalcapture():
@@ -185,5 +221,5 @@ def process_totalcapture():
 
 if __name__ == '__main__':
     process_amass()
-    # process_dipimu()
+    # process_dipimu(split='train')
     # process_totalcapture()

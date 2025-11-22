@@ -24,7 +24,7 @@ class RNN(torch.nn.Module):
 
     def forward(self, x, h=None):
         lengths = [_.shape[0] for _ in x]
-        x = relu(self.linear1(self.dropout(x)))
+        x = self.dropout(relu(self.linear1(x)))
         x, h = self.rnn(pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False))
         return self.linear2(pad_packed_sequence(x, batch_first=True)[0]), h
 
@@ -140,7 +140,11 @@ class MobilePoser(nn.Module):
     def from_pretrained(cls, cfg, model_path):
         """Load pretrained model."""
         model = cls(cfg)
-        model.load_state_dict(torch.load(model_path, map_location=cfg['device'], weights_only=True))
+        checkpoint = torch.load(model_path, map_location=cfg['device'], weights_only=True)
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
         return model
 
     def reset(self):
@@ -167,13 +171,41 @@ class MobilePoser(nn.Module):
     def _reduced_global_to_full(self, reduced_pose):
         """Convert reduced 6D pose to full 24-joint local rotations."""
         pose = art.math.r6d_to_rotation_matrix(reduced_pose).view(-1, joint_set.n_reduced, 3, 3)
-        pose = self._reduced_pose_to_full(pose.unsqueeze(0)).squeeze(0).view(-1, 24, 3, 3)
-        pred_pose = self.global_to_local_pose(pose)
+        pred_pose = self._reduced_pose_to_full(pose.unsqueeze(0)).squeeze(0).view(-1, 24, 3, 3)
+        if self.cfg['use_global_pose']:
+            pred_pose = self.global_to_local_pose(pose)
         pred_pose[:, joint_set.ignored] = torch.eye(3, device=self.device)
         pred_pose[:, 0] = pose[:, 0]
         return pred_pose
 
     def forward(self, imu):
+        """
+        Simple forward pass for training.
+        Args:
+            imu: [B, T, 60] IMU features
+        Returns:
+            pred_pose: [B, T, 24*6] 6D rotations (raw)
+            pred_joints: [B, T, 24*3] joint positions  
+            pred_vel: [B, T, 24*3] joint velocities
+            foot_contact: [B, T, 2] foot contact logits
+        """
+        # predict joints from IMU
+        pred_joints = self.joints(imu)  # [B, T, 24*3]
+        
+        # predict pose from joints + IMU
+        pose_input = torch.cat([pred_joints, imu], dim=-1)
+        pred_pose = self.pose(pose_input)  # [B, T, len(reduced_joint_set)*6]
+        
+        # predict foot contact from joints + IMU  
+        tran_input = torch.cat([pred_joints, imu], dim=-1)
+        foot_contact = self.foot_contact(tran_input)  # [B, T, 2]
+        
+        # predict velocity from joints + IMU
+        pred_vel = self.velocity(tran_input)  # [B, T, 24*3]
+        
+        return pred_pose, pred_joints, pred_vel, foot_contact
+
+    def predict(self, imu):
         """
         Forward pass.
         Args:
@@ -202,7 +234,7 @@ class MobilePoser(nn.Module):
         foot_contact = self.foot_contact(tran_input) # [B, T, 2]
         
         # forward the foot-joint velocity model
-        pred_vel = self.velocity.forward_online(tran_input).squeeze(0) # [B, T, 24*3]
+        pred_vel = self.velocity(tran_input) # [B, T, 24*3]
         
         return pred_pose, pred_joints, pred_vel, foot_contact
 
@@ -219,7 +251,7 @@ class MobilePoser(nn.Module):
             contact: [B*T, 2] foot contact probabilities
         """
         # forward the prediction model
-        pose, joints, vel, contact = self.forward(imu)
+        pose, joints, vel, contact = self.predict(imu)
         
         B, T = imu.shape[:2]
         pose = pose.view(B * T, 24, 3, 3)        # [B*T, 24, 3, 3]
@@ -237,7 +269,7 @@ class MobilePoser(nn.Module):
         
         # velocity from network-based estimation
         root_vel = vel[:, 0]  # [T, 3]
-        pred_vel = root_vel / (fps / vel_scale)
+        pred_vel = root_vel * (vel_scale / fps)
         
         # compute velocity as weighted combination of network-based and foot-contact-based
         weight = self._prob_to_weight(contact.max(dim=1).values.sigmoid()).view(-1, 1)

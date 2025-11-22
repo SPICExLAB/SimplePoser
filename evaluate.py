@@ -4,7 +4,7 @@ import torch
 from argparse import ArgumentParser
 import tqdm
 
-from config import *
+from config import paths, joint_set, fps, vel_scale
 import articulate as art
 from data import PoseDataset
 from model import MobilePoser
@@ -38,7 +38,7 @@ class PoseEvaluator:
 
 
 @torch.no_grad()
-def evaluate_pose(model, dataset, num_past_frame=20, num_future_frame=5, evaluate_tran=False):
+def evaluate_pose(model, dataset, num_future_frame=5):
     # specify device
     device = cfg['device']
 
@@ -48,12 +48,14 @@ def evaluate_pose(model, dataset, num_past_frame=20, num_future_frame=5, evaluat
         for imu, pose_6d, joint, tran, vel, contact in dataset
     ])
 
+    xs = xs[:10]
+    ys = ys[:10]
+
     # setup Pose Evaluator
     evaluator = PoseEvaluator()
 
     # track errors
     offline_errs, online_errs = [], []
-    tran_errors = {window_size: [] for window_size in list(range(1, 8))}
 
     model.eval()
     with torch.no_grad():

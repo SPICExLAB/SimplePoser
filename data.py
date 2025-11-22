@@ -12,7 +12,6 @@ from pathlib import Path
 
 import articulate as art
 from config import combos, paths, acc_scale, vel_scale, fps, joint_set
-from utils import load_yaml
 
 
 class PoseDataset(Dataset):
@@ -36,12 +35,12 @@ class PoseDataset(Dataset):
         self._load_data()
 
     def _get_data_files(self, data_folder: Path):
-        return [x.name for x in data_folder.iterdir() if not x.is_dir() and 'imuposer_test' in x.name]
+        return [x.name for x in data_folder.iterdir() if not x.is_dir()]
 
     def _load_data(self):
         # load data files
         if self.evaluate:
-            data_folder = Path(paths.imuposer_dir)
+            data_folder = Path(paths.dipimu_dir)
         else:
             data_folder = Path(paths.amass_dir)
 
@@ -62,14 +61,17 @@ class PoseDataset(Dataset):
             ori = ori[:, :5]                          # (N, 5, 3, 3)
             pose = pose.view(-1, 24, 3, 3)            # (N, 24, 3, 3)
 
+            if idx > 1:
+                break
+
             pose_global, joint = self.bodymodel.forward_kinematics(pose=pose) 
             if self.cfg['use_global_pose'] and not self.evaluate:
                 # use global pose for training 
                 pose = pose_global
 
-            joint = joint.view(-1, 24, 3)              # (N, 24, 3)
-            tran = tran.view(-1, 3)                    # (N, 3)
-            foot = foot.view(-1, 2) if foot else None  # (N, 2)
+            joint = joint.view(-1, 24, 3)                # (N, 24, 3)
+            tran = tran.view(-1, 3)                      # (N, 3)
+            foot = foot.view(-1, 2) if foot is not None else None  # (N, 2)
 
             self._process_data(acc, ori, pose, joint, tran, foot)
 
@@ -139,31 +141,26 @@ def collate_fn(batch):
     return imus, poses, joints, trans, vels, contacts, lengths
 
 
-class PoseDataModule(L.LightningDataModule):
-    def __init__(self, cfg):
-        super().__init__()
-        self.cfg = cfg
+def get_dataloaders(cfg, device):
+    """Get train and validation dataloaders."""
+    dataset = PoseDataset(cfg, fold='train')
     
-    def setup(self, stage):
-        if stage == 'fit':
-            dataset = PoseDataset(self.cfg, fold='train')
-            n_train = int(0.9 * len(dataset))
-            self.train_data, self.val_data = random_split(dataset, [n_train, len(dataset) - n_train])
-        
-        if stage == 'test':
-            self.test_data = PoseDataset(self.cfg, fold='test')
+    # 90/10 split
+    n_train = int(0.9 * len(dataset))
+    train_data, val_data = torch.utils.data.random_split(
+        dataset, [n_train, len(dataset) - n_train],
+        generator=torch.Generator().manual_seed(cfg['seed'])
+    )
+    print(f"Train: {len(train_data)} | Val: {len(val_data)}")
     
-    def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.cfg['batch_size'], 
-                         collate_fn=collate_fn, num_workers=self.cfg['num_workers'],
-                         shuffle=True, drop_last=True)
+    # dataloaders
+    loader_args = {
+        'batch_size': cfg['batch_size'],
+        'collate_fn': collate_fn,
+        'num_workers': cfg['num_workers'],
+        'pin_memory': device.type == 'cuda'
+    }
+    train_loader = DataLoader(train_data, shuffle=True, drop_last=True, **loader_args)
+    val_loader = DataLoader(val_data, shuffle=False, drop_last=False, **loader_args)
     
-    def val_dataloader(self):
-        return DataLoader(self.val_data, batch_size=self.cfg['batch_size'],
-                         collate_fn=collate_fn, num_workers=self.cfg['num_workers'],
-                         shuffle=False, drop_last=False)
-    
-    def test_dataloader(self):
-        return DataLoader(self.test_data, batch_size=self.cfg['batch_size'],
-                         collate_fn=collate_fn, num_workers=self.cfg.test.num_workers,
-                         shuffle=False, drop_last=False)
+    return train_loader, val_loader
