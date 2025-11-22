@@ -173,7 +173,7 @@ class MobilePoser(nn.Module):
         pose = art.math.r6d_to_rotation_matrix(reduced_pose).view(-1, joint_set.n_reduced, 3, 3)
         pred_pose = self._reduced_pose_to_full(pose.unsqueeze(0)).squeeze(0).view(-1, 24, 3, 3)
         if self.cfg['use_global_pose']:
-            pred_pose = self.global_to_local_pose(pose)
+            pred_pose = self.global_to_local_pose(pred_pose)
         pred_pose[:, joint_set.ignored] = torch.eye(3, device=self.device)
         pred_pose[:, 0] = pose[:, 0]
         return pred_pose

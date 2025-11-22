@@ -4,7 +4,7 @@ import torch
 from argparse import ArgumentParser
 import tqdm
 
-from config import paths, joint_set, fps, vel_scale
+from config import paths, joint_set, fps
 import articulate as art
 from data import PoseDataset
 from model import MobilePoser
