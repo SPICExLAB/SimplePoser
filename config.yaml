@@ -7,7 +7,9 @@ batch_size: 256
 num_epochs: 200
 learning_rate: 0.001
 num_workers: 0
-dropout: 0.2
+dropout: 0.4
+
+output_dir: checkpoints
 
 # model config
 past_frames: 40
@@ -15,5 +17,5 @@ future_frames: 5
 total_frames: past_frames + future_frames
 
 # settings
-use_global_pose: false
+use_global_pose: true
 window_length: 300

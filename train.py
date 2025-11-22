@@ -53,7 +53,7 @@ def train():
     cfg = load_yaml(args.config)
     device = torch.device(cfg['device'] if torch.cuda.is_available() else 'cpu')
     set_seed(cfg['seed'])
-    output_dir = Path('outputs')
+    output_dir = Path(cfg['output_dir'])
     output_dir.mkdir(exist_ok=True)
     
     print(f"Device: {device}")
@@ -73,11 +73,12 @@ def train():
         
         pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{cfg["num_epochs"]}')
         for imu, pose_6d, joints, tran, vel, contact, lengths in pbar:
-            imu = imu.to(device)
-            pose_6d = pose_6d.to(device)
-            joints = joints.to(device)
-            vel = vel.to(device)
-            contact = contact.to(device)
+            # move everything to device
+            imu = imu.to(device)         # [B, T, 60]
+            joints = joints.to(device)   # [B, T, 24, 3]
+            vel = vel.to(device)         # [B, T, 24, 3]
+            contact = contact.to(device) # [B, T, 2]
+            pose_6d = pose_6d.to(device) # [B, T, 24*6]
             
             B, T = pose_6d.shape[:2]
             pose_6d = pose_6d.view(B, T, 24, 6)[:, :, joint_set.reduced].view(B, T, -1)
@@ -91,7 +92,7 @@ def train():
             noisy_joints_contact = (joints + contact_noise).view(B, T, -1)
             noisy_joints_vel = (joints + vel_noise).view(B, T, -1)
             
-            # train each module independently
+            # train each module independently like MobilePoser 
             pred_joints = model.joints(imu)
             pred_pose = model.pose(torch.cat([noisy_joints_pose, imu], dim=-1))
             pred_contact = model.foot_contact(torch.cat([noisy_joints_contact, imu], dim=-1))
@@ -105,7 +106,14 @@ def train():
             pose_jerk_loss = compute_jerk_loss(pred_pose)
             joints_jerk_loss = compute_jerk_loss(pred_joints)
 
-            loss = 1e-5 * pose_jerk_loss + 1e-5 * joints_jerk_loss + joints_loss + pose_loss + contact_loss + 0.5 * vel_loss
+            # compute total loss
+            loss = 0.0
+            loss += joints_loss
+            loss += pose_loss
+            loss += contact_loss
+            loss += 0.5 * vel_loss
+            loss += 1e-5 * pose_jerk_loss
+            loss += 1e-5 * joints_jerk_loss
             
             # backward 
             optimizer.zero_grad()
