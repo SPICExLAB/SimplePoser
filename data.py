@@ -40,7 +40,7 @@ class PoseDataset(Dataset):
     def _load_data(self):
         # load data files
         if self.evaluate:
-            data_folder = Path(paths.dipimu_dir)
+            data_folder = Path(paths.totalcapture_dir)
         else:
             data_folder = Path(paths.amass_dir)
 

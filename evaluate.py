@@ -48,9 +48,6 @@ def evaluate_pose(model, dataset, num_future_frame=5):
         for imu, pose_6d, joint, tran, vel, contact in dataset
     ])
 
-    xs = xs[:10]
-    ys = ys[:10]
-
     # setup Pose Evaluator
     evaluator = PoseEvaluator()
 
