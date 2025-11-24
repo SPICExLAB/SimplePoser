@@ -23,6 +23,9 @@ class PoseDataset(Dataset):
         self.combos = combos
         self.bodymodel = art.model.ParametricModel(paths.smpl_file)
 
+        self.target_fps = cfg.get('target_fps', 60) # downsample, if necessary
+        self.step = max(1, round(60 / self.target_fps))
+
         self.data = {
             'imu_inputs': [],
             'pose_outputs': [],
@@ -69,6 +72,14 @@ class PoseDataset(Dataset):
             joint = joint.view(-1, 24, 3)                # (N, 24, 3)
             tran = tran.view(-1, 3)                      # (N, 3)
             foot = foot.view(-1, 2) if foot is not None else None  # (N, 2)
+
+            # downsample
+            acc = acc[::self.step]
+            ori = ori[::self.step]
+            pose = pose[::self.step]
+            tran = tran[::self.step]
+            joint = joint[::self.step]
+            foot = foot[::self.step] if foot is not None else None
 
             self._process_data(acc, ori, pose, joint, tran, foot)
 

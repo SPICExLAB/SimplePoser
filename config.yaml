@@ -12,6 +12,7 @@ dropout: 0.4
 output_dir: checkpoints
 
 # model config
+target_fps: 60
 past_frames: 40
 future_frames: 5
 total_frames: past_frames + future_frames
@@ -19,3 +20,8 @@ total_frames: past_frames + future_frames
 # settings
 use_global_pose: true
 window_length: 300
+
+# wandb
+wandb_project: SimplePoser
+wandb_run_name: right_pocket
+wandb_group: scratch

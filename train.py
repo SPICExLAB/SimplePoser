@@ -1,18 +1,14 @@
-import os
-import yaml
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from pathlib import Path
 from tqdm import tqdm
-import numpy as np
 from argparse import ArgumentParser
 
 from model import MobilePoser
 from data import get_dataloaders
 from utils import load_yaml, set_seed
-from config import joint_set
 from loss import compute_vel_loss, compute_jerk_loss
+from config import joint_set
 
 
 @torch.no_grad()
@@ -48,6 +44,7 @@ def evaluate(model, val_loader, device):
 def train():
     parser = ArgumentParser()
     parser.add_argument('--config', type=str, required=True)
+    parser.add_argument('--wandb', action='store_true')
     args = parser.parse_args()
 
     cfg = load_yaml(args.config)
@@ -55,6 +52,17 @@ def train():
     set_seed(cfg['seed'])
     output_dir = Path(cfg['output_dir'])
     output_dir.mkdir(exist_ok=True)
+
+    # setup wandb
+    if args.wandb:
+        import wandb
+        wandb.init(
+            project=cfg.get('wandb_project', 'simpleposer'),
+            name=cfg.get('wandb_run_name', None),
+            group=cfg.get('wandb_group', None),
+            tags=cfg.get('wandb_tags', []),
+            config=cfg,
+        )
     
     print(f"Device: {device}")
     print(f"Epochs: {cfg['num_epochs']} | Batch: {cfg['batch_size']} | LR: {cfg['learning_rate']}")
@@ -114,7 +122,7 @@ def train():
             loss += 0.5 * vel_loss
             loss += 1e-5 * pose_jerk_loss
             loss += 1e-5 * joints_jerk_loss
-            
+
             # backward 
             optimizer.zero_grad()
             loss.backward()
@@ -128,6 +136,13 @@ def train():
         val_loss = evaluate(model, val_loader, device)
         
         print(f"Epoch {epoch+1}: Train {train_loss:.4f} | Val {val_loss:.4f}")
+
+        if args.wandb:
+            wandb.log({
+                'train/loss': train_loss,
+                'val/loss': val_loss,
+                'epoch': epoch+1,
+            })
         
         # save checkpoint
         torch.save({
