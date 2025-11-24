@@ -50,7 +50,7 @@ def train():
     cfg = load_yaml(args.config)
     device = torch.device(cfg['device'] if torch.cuda.is_available() else 'cpu')
     set_seed(cfg['seed'])
-    output_dir = Path(cfg['output_dir'])
+    output_dir = Path(cfg['output_dir']) / Path(cfg['wandb_run_name'])
     output_dir.mkdir(exist_ok=True)
 
     # setup wandb

@@ -2,13 +2,17 @@
 seed: 42
 
 # training
-device: cuda
+device: cuda:1
 batch_size: 256
 num_epochs: 200
 learning_rate: 0.001
 num_workers: 0
 dropout: 0.4
 
+# data configs
+add_noise: true
+
+# output directory
 output_dir: checkpoints
 
 # model config
@@ -23,5 +27,5 @@ window_length: 300
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: right_pocket
-wandb_group: scratch
+wandb_run_name: rightpocket_calib_noise
+wandb_group: right_pocket

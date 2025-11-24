@@ -1,3 +1,3 @@
-# SimplePoser: MobilePoser But Simpler.
+# SimplePoser: MobilePoser But Simpler
 
 A simplified implementation of [MobilePoser](https://github.com/SPICExLAB/MobilePoser). The first-author of MobilePoser wrote some pretty bloated code that is clean but hard to use. It contains too many files, too many abstractions, and frankly just not nice to look at. Therefore, I present SimplePoser, the exact same as MobilePoser but better. Not great, but better. Better is good enough. 

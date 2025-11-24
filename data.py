@@ -4,13 +4,11 @@ import torch
 torch.set_printoptions(sci_mode=False)
 from torch.utils.data import Dataset, DataLoader, random_split
 import torch.nn as nn
-from typing import List
-import random
-import lightning as L
 from tqdm import tqdm
 from pathlib import Path
 
 import articulate as art
+from imu_synthesis import syn_imu_from_smpl
 from config import combos, paths, acc_scale, vel_scale, fps, joint_set
 
 
@@ -43,12 +41,14 @@ class PoseDataset(Dataset):
     def _load_data(self):
         # load data files
         if self.evaluate:
-            data_folder = Path(paths.totalcapture_dir)
+            data_folder = Path(paths.dipimu_dir)
+            # data_folder = Path(paths.totalcapture_dir)
         else:
             data_folder = Path(paths.amass_dir)
 
         data_files = self._get_data_files(data_folder)
-
+        data_files = data_files[:1]
+        
         # process each data file
         for data_file in tqdm(data_files):
             file_data = torch.load(data_folder / data_file, map_location=torch.device('cpu'), weights_only=True)
@@ -59,8 +59,24 @@ class PoseDataset(Dataset):
         joints = file_data.get('joint', [None] * len(poses))
         foots = file_data.get('contact', [None] * len(poses))
         
-        for idx, (acc, ori, pose, tran, joint, foot) in enumerate(zip(accs, oris, poses, trans, joints, foots)):
-            acc = acc[:, :5] / acc_scale  # (N, 5, 3), scale the acc to be in range [-1, 1]
+        pbar = tqdm(
+            enumerate(zip(accs, oris, poses, trans, joints, foots)),
+            total=len(accs),
+            desc=f"Processing {len(accs)} sequences",
+            leave=False
+        )
+        
+        for idx, (acc, ori, pose, tran, joint, foot) in pbar:
+            pbar.set_postfix({'seq': idx, 'frames': len(pose)})
+
+           # synthesize IMU with calibration error
+            if self.cfg['add_noise'] and not self.evaluate:
+                acc, gyro, ori = syn_imu_from_smpl(pose, tran)
+                acc = acc.cpu()
+                gyro = gyro.cpu()
+                ori = ori.cpu()
+
+            acc = acc[:, :5] 
             ori = ori[:, :5]                          # (N, 5, 3, 3)
             pose = pose.view(-1, 24, 3, 3)            # (N, 24, 3, 3)
 
@@ -73,8 +89,8 @@ class PoseDataset(Dataset):
             tran = tran.view(-1, 3)                      # (N, 3)
             foot = foot.view(-1, 2) if foot is not None else None  # (N, 2)
 
-            # downsample
-            acc = acc[::self.step]
+            # downsample, if necessary
+            acc = acc[::self.step] / acc_scale # scale the acc to be in range [-1, 1]
             ori = ori[::self.step]
             pose = pose[::self.step]
             tran = tran[::self.step]
