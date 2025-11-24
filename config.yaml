@@ -2,9 +2,9 @@
 seed: 42
 
 # training
-device: cuda:1
+device: cuda:0
 batch_size: 256
-num_epochs: 200
+num_epochs: 130
 learning_rate: 0.001
 num_workers: 0
 dropout: 0.4
@@ -27,5 +27,5 @@ window_length: 300
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: rightpocket_calib_noise
-wandb_group: right_pocket
+wandb_run_name: rp_calib_noise
+wandb_group: rightpocket
