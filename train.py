@@ -12,7 +12,7 @@ from config import joint_set
 
 
 @torch.no_grad()
-def evaluate(model, val_loader, device):
+def evaluate(model, val_loader, device, finetune=False):
     model.eval()
     total_loss = 0.0
     
@@ -20,22 +20,22 @@ def evaluate(model, val_loader, device):
         imu = imu.to(device)
         pose_6d = pose_6d.to(device)
         joints = joints.to(device)
-        vel = vel.to(device)
-        contact = contact.to(device)
         
         B, T = pose_6d.shape[:2]
         pose_6d = pose_6d.view(B, T, 24, 6)[:, :, joint_set.reduced].view(B, T, -1)
         
-        # forward the model
         pred_pose, pred_joints, pred_vel, pred_contact = model(imu)
         
-        # compute loss
         joints_loss = nn.MSELoss()(pred_joints, joints.view(B, T, -1))
         pose_loss = nn.MSELoss()(pred_pose, pose_6d)
-        contact_loss = nn.BCEWithLogitsLoss()(pred_contact, contact)
-        vel_loss = sum(compute_vel_loss(pred_vel, vel.view(B, T, -1), i) for i in [1, 3, 9])
+        loss = joints_loss + pose_loss
         
-        loss = joints_loss + pose_loss + contact_loss + 0.2 * vel_loss
+        if not finetune:
+            vel = vel.to(device)
+            contact = contact.to(device)
+            loss += nn.BCEWithLogitsLoss()(pred_contact, contact)
+            loss += 0.2 * sum(compute_vel_loss(pred_vel, vel.view(B, T, -1), i) for i in [1, 3, 9])
+        
         total_loss += loss.item()
     
     return total_loss / len(val_loader)
@@ -50,8 +50,6 @@ def train():
     cfg = load_yaml(args.config)
     device = torch.device(cfg['device'] if torch.cuda.is_available() else 'cpu')
     set_seed(cfg['seed'])
-    output_dir = Path(cfg['output_dir']) / Path(cfg['wandb_run_name'])
-    output_dir.mkdir(exist_ok=True)
 
     # setup wandb
     if args.wandb:
@@ -69,6 +67,19 @@ def train():
 
     # init model and data
     model = MobilePoser(cfg).to(device)
+
+    finetune = cfg.get('pretrained') is not None
+    if finetune:
+        # load pretrained model
+        model.load_state_dict(torch.load(cfg['pretrained'], map_location=device, weights_only=True))
+        print(f"Loaded pretrained: {cfg['pretrained']}")
+        output_dir = Path(cfg['output_dir']) / Path(cfg['wandb_run_name']) / "finetune"
+    else:
+        output_dir = Path(cfg['output_dir']) / Path(cfg['wandb_run_name'])
+
+    # create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     train_loader, val_loader = get_dataloaders(cfg, device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg['learning_rate'])
     print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}\n")
@@ -103,25 +114,22 @@ def train():
             # train each module independently like MobilePoser 
             pred_joints = model.joints(imu)
             pred_pose = model.pose(torch.cat([noisy_joints_pose, imu], dim=-1))
-            pred_contact = model.foot_contact(torch.cat([noisy_joints_contact, imu], dim=-1))
-            pred_vel = model.velocity(torch.cat([noisy_joints_vel, imu], dim=-1))
-            
+
             # compute losses
             joints_loss = nn.MSELoss()(pred_joints, joints.view(B, T, -1))
             pose_loss = nn.MSELoss()(pred_pose, pose_6d)
-            contact_loss = nn.BCEWithLogitsLoss()(pred_contact, contact)
-            vel_loss = sum(compute_vel_loss(pred_vel, vel.view(B, T, -1), i) for i in [1, 3, 9])
             pose_jerk_loss = compute_jerk_loss(pred_pose)
             joints_jerk_loss = compute_jerk_loss(pred_joints)
-
-            # compute total loss
-            loss = 0.0
-            loss += joints_loss
-            loss += pose_loss
-            loss += contact_loss
-            loss += 0.5 * vel_loss
-            loss += 1e-5 * pose_jerk_loss
-            loss += 1e-5 * joints_jerk_loss
+            loss = joints_loss + pose_loss + 1e-5 * (pose_jerk_loss + joints_jerk_loss)
+            
+            # compute contact and velocity losses
+            if not finetune:
+                pred_contact = model.foot_contact(torch.cat([noisy_joints_contact, imu], dim=-1))
+                pred_vel = model.velocity(torch.cat([noisy_joints_vel, imu], dim=-1))
+                contact_loss = nn.BCEWithLogitsLoss()(pred_contact, contact)
+                vel_loss = sum(compute_vel_loss(pred_vel, vel.view(B, T, -1), i) for i in [1, 3, 9])
+                loss += contact_loss
+                loss += 0.5 * vel_loss
 
             # backward 
             optimizer.zero_grad()
@@ -133,7 +141,7 @@ def train():
             pbar.set_postfix({'loss': f'{loss.item():.4f}'})
         
         train_loss /= len(train_loader)
-        val_loss = evaluate(model, val_loader, device)
+        val_loss = evaluate(model, val_loader, device, finetune)
         
         print(f"Epoch {epoch+1}: Train {train_loss:.4f} | Val {val_loss:.4f}")
 

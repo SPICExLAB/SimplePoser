@@ -10,6 +10,14 @@ amass_data = ['ACCAD', 'BioMotionLab_NTroje', 'BMLhandball', 'BMLmovi', 'CMU',
               'HumanEva', 'KIT', 'MPI_HDM05', 'MPI_Limits', 'MPI_mosh', 'SFU', 'SOMA',
               'SSM_synced', 'TCD_handMocap', 'TotalCapture', 'Transitions_mocap']
 
+# dataset 
+datasets = {
+    'AMASS':        {'fps': 60},
+    'DIP_IMU':      {'fps': 60},
+    'IMUPoser':     {'fps': 30},
+    'TotalCapture': {'fps': 60},
+}
+
 
 # device-location combinations
 combos = {
@@ -24,15 +32,17 @@ combos = {
     # 'lw_rp': [0, 3],
     # 'h': [4],
     # 'rw_lp': [1, 2],
-    # 'rw_rp': [1, 3],
+    'rw_rp': [1, 3],
     # 'lp_h': [2, 4],
     # 'rp_h': [3, 4],
     # 'lp': [2],
-    'rp': [3],
+    # 'rp': [3],
 }
 
 
 class paths:
+    data_dir = '/data/projects/Pose/dataset_work' # directory of processed datasets
+
     raw_amass_dir = '/data/projects/Pose/raw/AMASS'      # raw AMASS dataset path (raw_amass_dir/ACCAD/ACCAD/s001/*.npz)
     amass_dir = '/data/projects/Pose/dataset_work/AMASS'              # output path for the synthetic AMASS dataset
 
@@ -44,7 +54,8 @@ class paths:
     raw_totalcapture_official_dir = 'data/dataset_raw/TotalCapture/official'    # contain official gt (S1/acting1/gt_skel_gbl_pos.txt)
     totalcapture_dir = '/data/projects/Pose/dataset_work/TotalCapture'          # output path for the preprocessed TotalCapture dataset
 
-    imuposer_dir = '/data/datasets/pose/eval/'          # output path for the preprocessed IMUPoser dataset
+    raw_imuposer_dir = '/data/projects/Pose/raw/IMUPoser'          # raw IMUPoser dataset path (raw_imuposer_dir/P1/*.pkl)
+    imuposer_dir = '/data/projects/Pose/dataset_work/IMUPoser'          # output path for the preprocessed IMUPoser dataset
 
     example_dir = 'data/example'                    # example IMU measurements
     smpl_file = 'models/SMPL_male.pkl'              # official SMPL model path
@@ -68,7 +79,7 @@ class joint_set:
     n_ignored = len(ignored)
 
 
-fps = 60
+fps = 30
 acc_scale = 30
-vel_scale = 3
+vel_scale = 2
 gravity_velocity = -0.018

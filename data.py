@@ -9,7 +9,7 @@ from pathlib import Path
 
 import articulate as art
 from imu_synthesis import syn_imu_from_smpl
-from config import combos, paths, acc_scale, vel_scale, fps, joint_set
+from config import combos, paths, acc_scale, vel_scale, fps, joint_set, datasets
 
 
 class PoseDataset(Dataset):
@@ -21,8 +21,8 @@ class PoseDataset(Dataset):
         self.combos = combos
         self.bodymodel = art.model.ParametricModel(paths.smpl_file)
 
-        self.target_fps = cfg.get('target_fps', 60) # downsample, if necessary
-        self.step = max(1, round(60 / self.target_fps))
+        source_fps = datasets[cfg['dataset']]['fps'] # downsample, if necessary
+        self.step = max(1, round(source_fps / cfg['target_fps']))
 
         self.data = {
             'imu_inputs': [],
@@ -39,15 +39,19 @@ class PoseDataset(Dataset):
         return [x.name for x in data_folder.iterdir() if not x.is_dir()]
 
     def _load_data(self):
-        # load data files
-        if self.evaluate:
-            data_folder = Path(paths.dipimu_dir)
-            # data_folder = Path(paths.totalcapture_dir)
-        else:
-            data_folder = Path(paths.amass_dir)
+        data_folder = Path(paths.data_dir) / self.cfg['dataset']
 
-        data_files = self._get_data_files(data_folder)
-        data_files = data_files[:1]
+        train_file = data_folder / 'train.pt'
+        test_file = data_folder / 'test.pt'
+
+        if train_file.exists():
+            # load train or test file (when finetuning models)
+            data_files = ['test.pt'] if self.evaluate else ['train.pt']
+        else:
+            # load all data files
+            data_files = self._get_data_files(data_folder)
+
+        print(f"Loading {data_files} from {data_folder}")
         
         # process each data file
         for data_file in tqdm(data_files):
@@ -124,6 +128,7 @@ class PoseDataset(Dataset):
             vel = torch.cat([torch.zeros(1, 24, 3), torch.diff(joint, dim=0)])
             vel[:, 0] = root_vel
             vel = vel * (fps / vel_scale)
+            self.data['vel_outputs'].extend(torch.split(vel, window))
             
             if not self.evaluate: # not necessary nor available for some datasets
                 self.data['vel_outputs'].extend(torch.split(vel, window))
@@ -136,7 +141,7 @@ class PoseDataset(Dataset):
         imu = self.data['imu_inputs'][idx].float()
         joint = self.data['joint_outputs'][idx].float()
         tran = self.data['tran_outputs'][idx].float()
-        vel = self.data['vel_outputs'][idx].float() if self.data['vel_outputs'] else None
+        vel = self.data['vel_outputs'][idx].float()
         contact = self.data['foot_outputs'][idx].float() if self.data['foot_outputs'] else None
         
         # convert pose rotations to 6D representation

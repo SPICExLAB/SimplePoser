@@ -3,24 +3,25 @@ seed: 42
 
 # training
 device: cuda:0
-batch_size: 256
-num_epochs: 130
-learning_rate: 0.001
+batch_size: 32
+num_epochs: 8
+learning_rate: 0.0001
 num_workers: 0
 dropout: 0.4
 
 # data configs
-dataset: TotalCapture
-target_fps: 30
-add_noise: true
+dataset: IMUPoser
+add_noise: false
 
 # output directory
 output_dir: checkpoints
 
 # model config
+target_fps: 30
 past_frames: 40
 future_frames: 5
 total_frames: past_frames + future_frames
+pretrained: checkpoints/rprw_30fps/best.pt
 
 # settings
 use_global_pose: true

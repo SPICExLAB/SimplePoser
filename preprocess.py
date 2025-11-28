@@ -17,39 +17,40 @@ import glob
 from config import paths, amass_data
 
 
-def process_amass(smooth_n=4):
+# left wrist, right wrist, left thigh, right thigh, head, pelvis
+vi_mask = torch.tensor([1961, 5424, 876, 4362, 411, 3021])
+ji_mask = torch.tensor([18, 19, 1, 2, 15, 0])
 
-    def _syn_acc(v):
-        r"""
-        Synthesize accelerations from vertex positions.
-        """
-        mid = smooth_n // 2
-        acc = torch.stack([(v[i] + v[i + 2] - 2 * v[i + 1]) * 3600 for i in range(0, v.shape[0] - 2)])
-        acc = torch.cat((torch.zeros_like(acc[:1]), acc, torch.zeros_like(acc[:1])))
-        if mid != 0:
-            acc[smooth_n:-smooth_n] = torch.stack(
-                [(v[i] + v[i + smooth_n * 2] - 2 * v[i + smooth_n]) * 3600 / smooth_n ** 2
-                 for i in range(0, v.shape[0] - smooth_n * 2)])
-        return acc
+body_model = art.ParametricModel(paths.smpl_file)
 
-    def _foot_ground_probs(joint):
-        r"""
-        Compute foot-ground contact probabilities.
-        """
-        dist_lfeet = torch.norm(joint[1:, 10] - joint[:-1, 10], dim=1)
-        dist_rfeet = torch.norm(joint[1:, 11] - joint[:-1, 11], dim=1)
-        lfoot_contact = (dist_lfeet < 0.008).int()
-        rfoot_contact = (dist_rfeet < 0.008).int()
-        lfoot_contact = torch.cat((torch.zeros(1, dtype=torch.int), lfoot_contact))
-        rfoot_contact = torch.cat((torch.zeros(1, dtype=torch.int), rfoot_contact))
-        return torch.stack((lfoot_contact, rfoot_contact), dim=1)        
 
-    # left wrist, right wrist, left thigh, right thigh, head, pelvis
-    vi_mask = torch.tensor([1961, 5424, 876, 4362, 411, 3021])
-    ji_mask = torch.tensor([18, 19, 1, 2, 15, 0])
+def _syn_acc(v, smooth_n=4):
+    r"""
+    Synthesize accelerations from vertex positions.
+    """
+    mid = smooth_n // 2
+    acc = torch.stack([(v[i] + v[i + 2] - 2 * v[i + 1]) * 3600 for i in range(0, v.shape[0] - 2)])
+    acc = torch.cat((torch.zeros_like(acc[:1]), acc, torch.zeros_like(acc[:1])))
+    if mid != 0:
+        acc[smooth_n:-smooth_n] = torch.stack(
+            [(v[i] + v[i + smooth_n * 2] - 2 * v[i + smooth_n]) * 3600 / smooth_n ** 2
+                for i in range(0, v.shape[0] - smooth_n * 2)])
+    return acc
 
-    body_model = art.ParametricModel(paths.smpl_file)
+def _foot_ground_probs(joint):
+    r"""
+    Compute foot-ground contact probabilities.
+    """
+    dist_lfeet = torch.norm(joint[1:, 10] - joint[:-1, 10], dim=1)
+    dist_rfeet = torch.norm(joint[1:, 11] - joint[:-1, 11], dim=1)
+    lfoot_contact = (dist_lfeet < 0.008).int()
+    rfoot_contact = (dist_rfeet < 0.008).int()
+    lfoot_contact = torch.cat((torch.zeros(1, dtype=torch.int), lfoot_contact))
+    rfoot_contact = torch.cat((torch.zeros(1, dtype=torch.int), rfoot_contact))
+    return torch.stack((lfoot_contact, rfoot_contact), dim=1)        
 
+
+def process_amass():
     data_pose, data_trans, data_beta, length = [], [], [], []
     for ds_name in amass_data:
         print('\rReading', ds_name)
@@ -219,7 +220,65 @@ def process_totalcapture():
     print('Preprocessed TotalCapture dataset is saved at', paths.totalcapture_dir)
 
 
+def process_imuposer(split: str="train"):
+    """Preprocess the IMUPoser dataset"""
+
+    train_split = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8']
+    test_split = ['P9', 'P10']
+    subjects = train_split if split == "train" else test_split
+
+    accs, oris, poses, trans, contacts, joints = [], [], [], [], [], []
+    for subject_name in sorted(os.listdir(paths.raw_imuposer_dir)):
+        if subject_name not in subjects:
+            continue
+
+        print(f"Processing: {subject_name}")
+        for motion_name in sorted(os.listdir(os.path.join(paths.raw_imuposer_dir, subject_name))):
+            with open(os.path.join(paths.raw_imuposer_dir, subject_name, motion_name), "rb") as f: 
+                fdata = pickle.load(f)
+                
+                acc = fdata['imu'][:, :5*3].view(-1, 5, 3)
+                ori = fdata['imu'][:, 5*3:].view(-1, 5, 3, 3)
+                pose = art.math.axis_angle_to_rotation_matrix(fdata['pose']).view(-1, 24, 3, 3)
+                tran = fdata['trans'].to(torch.float32)
+                
+                 # align IMUPoser global fame with DIP
+                rot = torch.tensor([[[-1, 0, 0], [0, 0, 1], [0, 1, 0.]]])
+                pose[:, 0] = rot.matmul(pose[:, 0])
+                tran = tran.matmul(rot.squeeze())
+
+                # obtain joints positions and foot-ground contact probabilities
+                _, joint, _ = body_model.forward_kinematics(pose, None, tran, calc_mesh=True)
+                contact = _foot_ground_probs(joint)
+
+                # ensure sizes are consistent
+                assert tran.shape[0] == pose.shape[0]
+
+                accs.append(acc.clone())          # N, 5, 3
+                oris.append(ori.clone())          # N, 5, 3, 3
+                contacts.append(contact.clone())  # N, 2
+                joints.append(joint.clone())      # N, 24, 3
+                poses.append(pose.clone())        # N, 24, 3, 3
+                trans.append(tran.clone())        # N, 3
+
+    print(f"# Data Processed: {len(accs)}")
+    data = {
+        'acc': accs,
+        'ori': oris,
+        'pose': poses,
+        'tran': trans,
+        'contact': contacts,
+        'joint': joints
+    }
+    os.makedirs(paths.imuposer_dir, exist_ok=True)
+    data_path = os.path.join(paths.imuposer_dir, f'{split}.pt')
+    torch.save(data, data_path)
+    print(f'Preprocessed IMUPoser {split} dataset is saved at', data_path)
+
+
+
 if __name__ == '__main__':
-    process_amass()
+    # process_amass()
     # process_dipimu(split='train')
     # process_totalcapture()
+    process_imuposer(split='test')
