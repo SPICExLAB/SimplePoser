@@ -47,9 +47,20 @@ def train():
     parser.add_argument('--wandb', action='store_true')
     args = parser.parse_args()
 
+    # load config
     cfg = load_yaml(args.config)
     device = torch.device(cfg['device'] if torch.cuda.is_available() else 'cpu')
     set_seed(cfg['seed'])
+
+    # load semoae model
+    if cfg['use_semoae']:
+        from semoae.semoae import SemoAE
+        print("Loading SemoAE for IMU augmentation")
+        semo = SemoAE(feat_dim=45, encode_dim=32).to(device)
+        semo_ckpt = torch.load(cfg['semoae_ckpt'], map_location=device, weights_only=True)
+        semo.load_state_dict(semo_ckpt["model_state_dict"])
+        semo.eval()
+        print("  → SemoAE loaded.\n")
 
     # setup wandb
     if args.wandb:
@@ -93,7 +104,7 @@ def train():
         pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{cfg["num_epochs"]}')
         for imu, pose_6d, joints, tran, vel, contact, lengths in pbar:
             # move everything to device
-            imu = imu.to(device)         # [B, T, 60]
+            imu = imu.to(device)         # [B, T, 60/45]
             joints = joints.to(device)   # [B, T, 24, 3]
             vel = vel.to(device)         # [B, T, 24, 3]
             contact = contact.to(device) # [B, T, 2]
@@ -101,6 +112,10 @@ def train():
             
             B, T = pose_6d.shape[:2]
             pose_6d = pose_6d.view(B, T, 24, 6)[:, :, joint_set.reduced].view(B, T, -1)
+
+            # add secondary motion to IMU
+            if cfg['use_semoae'] and torch.rand(1) < cfg['semo_prob']:
+                imu = semo.add_secondary_motion(imu, cfg['semo_eta']) # [B, T, 60/45]
             
             # add noise to GT joints for downstream modules
             pose_noise = torch.randn_like(joints) * 0.04

@@ -248,6 +248,4 @@ class SemoAE(nn.Module):
         rot = self._r6d_norm(rot)
 
         x = torch.cat([acc, rot], dim=-1)
-        print("adding secondary motion")
-        print(x.shape)
         return x

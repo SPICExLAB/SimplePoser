@@ -82,7 +82,7 @@ def visualize(clean, aug, real, imu=0, axis=0, out_dir="vis"):
 def main():
     ckpt_path = "semoae/checkpoints/semoae_best.pt"
     data_path = "/data/projects/Pose/dataset_work/IMUPoser/train.pt"
-    eta = 0.5
+    eta = 0.2
     seq_len = 150
     imu_to_plot, axis_to_plot = 3, 0
 
@@ -94,7 +94,7 @@ def main():
     real_seq  = torch.stack([dataset[i][1] for i in range(seq_len)])
 
     # load model
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     model = SemoAE(feat_dim=45, encode_dim=32)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()

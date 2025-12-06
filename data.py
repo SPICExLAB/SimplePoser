@@ -104,6 +104,8 @@ class PoseDataset(Dataset):
             self._process_data(acc, ori, pose, joint, tran, foot)
 
     def _process_data(self, acc, ori, pose, joint, tran, foot):
+        use_r6d = self.cfg['use_r6d_input']
+
         for _, c in self.combos.items():
             # mask: zero out sensors not in this combo
             combo_acc = torch.zeros_like(acc)
@@ -111,7 +113,11 @@ class PoseDataset(Dataset):
             combo_acc[:, c] = acc[:, c]
             combo_ori[:, c] = ori[:, c]
             
-            # flatten to [T, 60]: 5 sensors * (3 acc + 9 ori)
+            # use r6d input
+            if use_r6d:
+                combo_ori = art.math.rotation_matrix_to_r6d(combo_ori).view(-1, 5, 6) # [T, 5, 6]
+
+            # flatten to [T, 60/45]: 5 sensors * (3 acc + 9/6 ori)
             imu = torch.cat([combo_acc.flatten(1), combo_ori.flatten(1)], dim=1)
             
             # split long sequences into windows
@@ -128,7 +134,6 @@ class PoseDataset(Dataset):
             vel = torch.cat([torch.zeros(1, 24, 3), torch.diff(joint, dim=0)])
             vel[:, 0] = root_vel
             vel = vel * (fps / vel_scale)
-            self.data['vel_outputs'].extend(torch.split(vel, window))
             
             if not self.evaluate: # not necessary nor available for some datasets
                 self.data['vel_outputs'].extend(torch.split(vel, window))
@@ -141,7 +146,7 @@ class PoseDataset(Dataset):
         imu = self.data['imu_inputs'][idx].float()
         joint = self.data['joint_outputs'][idx].float()
         tran = self.data['tran_outputs'][idx].float()
-        vel = self.data['vel_outputs'][idx].float()
+        vel = self.data['vel_outputs'][idx].float() if self.data['vel_outputs'] else None
         contact = self.data['foot_outputs'][idx].float() if self.data['foot_outputs'] else None
         
         # convert pose rotations to 6D representation
