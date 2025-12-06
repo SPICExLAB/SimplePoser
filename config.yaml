@@ -10,7 +10,7 @@ num_workers: 0
 dropout: 0.4
 
 # data configs
-dataset: TotalCapture
+dataset: IMUPoser
 target_fps: 30
 add_noise: true
 

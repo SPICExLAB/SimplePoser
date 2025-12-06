@@ -28,12 +28,13 @@ def _syn_acc(v, smooth_n=4):
     r"""
     Synthesize accelerations from vertex positions.
     """
+    fps = 30
     mid = smooth_n // 2
-    acc = torch.stack([(v[i] + v[i + 2] - 2 * v[i + 1]) * 3600 for i in range(0, v.shape[0] - 2)])
+    acc = torch.stack([(v[i] + v[i + 2] - 2 * v[i + 1]) * (fps**2) for i in range(0, v.shape[0] - 2)])
     acc = torch.cat((torch.zeros_like(acc[:1]), acc, torch.zeros_like(acc[:1])))
     if mid != 0:
         acc[smooth_n:-smooth_n] = torch.stack(
-            [(v[i] + v[i + smooth_n * 2] - 2 * v[i + smooth_n]) * 3600 / smooth_n ** 2
+            [(v[i] + v[i + smooth_n * 2] - 2 * v[i + smooth_n]) * (fps**2) / smooth_n ** 2
                 for i in range(0, v.shape[0] - smooth_n * 2)])
     return acc
 
@@ -228,6 +229,7 @@ def process_imuposer(split: str="train"):
     subjects = train_split if split == "train" else test_split
 
     accs, oris, poses, trans, contacts, joints = [], [], [], [], [], []
+    syn_acc, syn_ori = [], []
     for subject_name in sorted(os.listdir(paths.raw_imuposer_dir)):
         if subject_name not in subjects:
             continue
@@ -248,7 +250,7 @@ def process_imuposer(split: str="train"):
                 tran = tran.matmul(rot.squeeze())
 
                 # obtain joints positions and foot-ground contact probabilities
-                _, joint, _ = body_model.forward_kinematics(pose, None, tran, calc_mesh=True)
+                grot, joint, vert = body_model.forward_kinematics(pose, None, tran, calc_mesh=True)
                 contact = _foot_ground_probs(joint)
 
                 # ensure sizes are consistent
@@ -261,12 +263,18 @@ def process_imuposer(split: str="train"):
                 poses.append(pose.clone())        # N, 24, 3, 3
                 trans.append(tran.clone())        # N, 3
 
+                # synthesize IMU accelerations and orientations
+                syn_acc.append(_syn_acc(vert[:, vi_mask]).clone()) # N, 6, 3
+                syn_ori.append(grot[:, ji_mask].clone())           # N, 6, 3, 3
+
     print(f"# Data Processed: {len(accs)}")
     data = {
         'acc': accs,
         'ori': oris,
         'pose': poses,
         'tran': trans,
+        'syn_acc': syn_acc,
+        'syn_ori': syn_ori,
         'contact': contacts,
         'joint': joints
     }
