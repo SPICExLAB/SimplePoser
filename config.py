@@ -71,8 +71,8 @@ class joint_set:
     lower_body = [0, 1, 2, 4, 5, 7, 8, 10, 11]
     lower_body_parent = [None, 0, 0, 1, 2, 3, 4, 5, 6]
 
-    # n_imu =  5 * (3 + 9) # 5 sensors * (3 acc + 9 ori)
-    n_imu =  5 * (3 + 6) # 5 sensors * (3 acc + 6 r6d)
+    n_imu =  5 * (3 + 9) # 5 sensors * (3 acc + 9 ori)
+    # n_imu =  5 * (3 + 6) # 5 sensors * (3 acc + 6 r6d)
 
     n_leaf = len(leaf)
     n_full = len(full)
