@@ -24,16 +24,11 @@ total_frames: past_frames + future_frames
 
 # settings
 use_global_pose: true
+normalize_imu: true
 use_r6d_input: false
 window_length: 150
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: rprw_30fps_rot
+wandb_run_name: rprw_30fps_normalized
 wandb_group: rightpocket
-
-# semoae config
-semoae_ckpt: "semoae/checkpoints/semoae_best.pt"
-use_semoae: false
-semo_eta: 0.5
-semo_prob: 0.5

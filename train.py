@@ -8,7 +8,8 @@ from model import MobilePoser
 from data import get_dataloaders
 from utils import load_yaml, set_seed
 from loss import compute_vel_loss, compute_jerk_loss
-from config import joint_set
+from config import joint_set, paths
+import articulate as art
 
 
 @torch.no_grad()
@@ -41,6 +42,7 @@ def evaluate(model, val_loader, device, finetune=False):
     return total_loss / len(val_loader)
 
 
+
 def train():
     parser = ArgumentParser()
     parser.add_argument('--config', type=str, required=True)
@@ -52,15 +54,8 @@ def train():
     device = torch.device(cfg['device'] if torch.cuda.is_available() else 'cpu')
     set_seed(cfg['seed'])
 
-    # load semoae model
-    if cfg['use_semoae']:
-        from semoae.semoae import SemoAE
-        print("Loading SemoAE for IMU augmentation")
-        semo = SemoAE(feat_dim=45, encode_dim=32).to(device)
-        semo_ckpt = torch.load(cfg['semoae_ckpt'], map_location=device, weights_only=True)
-        semo.load_state_dict(semo_ckpt["model_state_dict"])
-        semo.eval()
-        print("  → SemoAE loaded.\n")
+    # body model
+    bodymodel = art.model.ParametricModel(paths.smpl_file, device=device)
 
     # setup wandb
     if args.wandb:
@@ -113,10 +108,6 @@ def train():
             B, T = pose_6d.shape[:2]
             pose_6d = pose_6d.view(B, T, 24, 6)[:, :, joint_set.reduced].view(B, T, -1)
 
-            # add secondary motion to IMU
-            if cfg['use_semoae'] and torch.rand(1) < cfg['semo_prob']:
-                imu = semo.add_secondary_motion(imu, cfg['semo_eta']) # [B, T, 60/45]
-            
             # add noise to GT joints for downstream modules
             pose_noise = torch.randn_like(joints) * 0.04
             contact_noise = torch.randn_like(joints) * 0.04
@@ -130,12 +121,17 @@ def train():
             pred_joints = model.joints(imu)
             pred_pose = model.pose(torch.cat([noisy_joints_pose, imu], dim=-1))
 
+            # get joints from pose 
+            # full_pose = model._reduced_global_to_full(root_rotation, pred_pose)
+            # pose_joints = bodymodel.forward_kinematics(pose=pred_pose.view(-1, 216))[1].view(B, T, -1)
+            # fk_loss = nn.MSELoss()(pose_joints, joints.view(B, T, -1))
+
             # compute losses
             joints_loss = nn.MSELoss()(pred_joints, joints.view(B, T, -1))
             pose_loss = nn.MSELoss()(pred_pose, pose_6d)
             pose_jerk_loss = compute_jerk_loss(pred_pose)
             joints_jerk_loss = compute_jerk_loss(pred_joints)
-            loss = joints_loss + pose_loss + 1e-5 * (pose_jerk_loss + joints_jerk_loss)
+            loss = joints_loss + pose_loss + 1e-5 * (pose_jerk_loss + joints_jerk_loss)            
             
             # compute contact and velocity losses
             if not finetune:

@@ -1,5 +1,4 @@
 import math
-import numpy as np
 import torch
 torch.set_printoptions(sci_mode=False)
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -10,6 +9,7 @@ from pathlib import Path
 import articulate as art
 from imu_synthesis import syn_imu_from_smpl
 from config import combos, paths, acc_scale, vel_scale, fps, joint_set, datasets
+from utils import normalize_imu
 
 
 class PoseDataset(Dataset):
@@ -112,6 +112,10 @@ class PoseDataset(Dataset):
             combo_ori = torch.zeros_like(ori)
             combo_acc[:, c] = acc[:, c]
             combo_ori[:, c] = ori[:, c]
+
+            # normalize acc, ori to root IMU
+            if self.cfg['normalize_imu']:
+                combo_acc, combo_ori = normalize_imu(combo_acc, combo_ori) # acc: [T, 5, 3], ori: [T, 5, 3, 3]
             
             # use r6d input
             if use_r6d:
@@ -134,13 +138,17 @@ class PoseDataset(Dataset):
             vel = torch.cat([torch.zeros(1, 24, 3), torch.diff(joint, dim=0)])
             vel[:, 0] = root_vel
             vel = vel * (fps / vel_scale)
+
+            # transform velocity to root-local frame
+            if self.cfg['normalize_imu']:
+                vel = torch.bmm(ori[:, 3].transpose(1, 2), vel.transpose(1, 2)).transpose(1, 2)  # [T, 24, 3]
             
             if not self.evaluate: # not necessary nor available for some datasets
                 self.data['vel_outputs'].extend(torch.split(vel, window))
                 self.data['foot_outputs'].extend(torch.split(foot, window))
 
     def __len__(self):
-        return len(self.data['imu_inputs'])            
+        return len(self.data['imu_inputs'])
 
     def __getitem__(self, idx):
         imu = self.data['imu_inputs'][idx].float()

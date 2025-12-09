@@ -9,6 +9,7 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 import articulate as art
 from config import joint_set, gravity_velocity, paths, fps, vel_scale
+from utils import normalize_imu
 
 
 class RNN(torch.nn.Module):
@@ -108,6 +109,15 @@ class MobilePoser(nn.Module):
         # body model
         self.bodymodel = art.model.ParametricModel(paths.smpl_file, device=self.device)
         self.global_to_local_pose = self.bodymodel.inverse_kinematics_R
+
+        # lower body joint
+        j, _ = self.bodymodel.get_zero_pose_joint_and_vertex()
+        b = art.math.joint_position_to_bone_vector(j[joint_set.lower_body].unsqueeze(0),
+                                                   joint_set.lower_body_parent).squeeze(0)
+        bone_orientation, bone_length = art.math.normalize_tensor(b, return_norm=True)
+        b = bone_orientation * bone_length
+        b[:3] = 0
+        self.lower_body_bone = b
         
         # model components
         self.pose = Poser()
@@ -168,7 +178,7 @@ class MobilePoser(nn.Module):
         full_pose = full_pose.view(B, S, -1)
         return full_pose
 
-    def _reduced_global_to_full(self, reduced_pose):
+    def _reduced_global_to_full(self, root_rotation, reduced_pose):
         """Convert reduced 6D pose to full 24-joint local rotations."""
         pose = art.math.r6d_to_rotation_matrix(reduced_pose).view(-1, joint_set.n_reduced, 3, 3)
         pred_pose = self._reduced_pose_to_full(pose.unsqueeze(0)).squeeze(0).view(-1, 24, 3, 3)
@@ -218,6 +228,9 @@ class MobilePoser(nn.Module):
         """
         B, T = imu.shape[:2]
 
+        # root rotation 
+        root_rotation = imu[..., 42:51].view(-1, 3, 3)
+
         # forward the joint prediction model
         pred_joints = self.joints(imu) # [B, T, 24*3]
         
@@ -226,7 +239,7 @@ class MobilePoser(nn.Module):
         pred_pose = self.pose(pose_input) # [B, T, 24*6]
 
         # global pose to local
-        pred_pose = self._reduced_global_to_full(pred_pose) # [B*T, 24, 3, 3]
+        pred_pose = self._reduced_global_to_full(root_rotation, pred_pose) # [B*T, 24, 3, 3]
         pred_pose = pred_pose.view(B, T, 24, 3, 3) # [B, T, 24, 3, 3]
         
         # forward the foot-ground contact probability model
@@ -260,25 +273,33 @@ class MobilePoser(nn.Module):
         vel = vel.view(B * T, 24, 3)             # [B*T, 24, 3]
         
         # calculate velocity from foot-ground contact
-        floor_y = self.j[10:12, 1].min().item()
+        j = art.math.forward_kinematics(pose[:, joint_set.lower_body],
+                                        self.lower_body_bone.expand(pose.shape[0], -1, -1),
+                                        joint_set.lower_body_parent)[1]        
         contact_vel = self.gravity_velocity + art.math.lerp(
-            torch.cat([torch.zeros(1, 3).to(self.device), joints[:-1, 10] - joints[1:, 10]]),
-            torch.cat([torch.zeros(1, 3).to(self.device), joints[:-1, 11] - joints[1:, 11]]),
+            torch.cat((torch.zeros(1, 3, device=j.device), j[:-1, 7] - j[1:, 7])),
+            torch.cat((torch.zeros(1, 3, device=j.device), j[:-1, 8] - j[1:, 8])),
             contact.max(dim=1).indices.view(-1, 1)
         )
         
         # velocity from network-based estimation
         root_vel = vel[:, 0]  # [T, 3]
         pred_vel = root_vel * (vel_scale / fps)
+
+        # transform to world space if normalized
+        if self.cfg['normalize_imu']:
+            root_rotation = imu[..., 42:51].view(-1, 3, 3) # root rotation from IMU (pocket, index 3)
+            pred_vel = torch.bmm(root_rotation, pred_vel.unsqueeze(-1)).squeeze(-1)
         
         # compute velocity as weighted combination of network-based and foot-contact-based
         weight = self._prob_to_weight(contact.max(dim=1).values.sigmoid()).view(-1, 1)
         velocity = art.math.lerp(pred_vel, contact_vel, weight)
         
         # remove penetration
+        floor_y = self.j[10:12, 1].min().item()
         current_root_y = 0
         for i in range(velocity.shape[0]):
-            current_foot_y = current_root_y + joints[i, 10:12, 1].min().item()
+            current_foot_y = current_root_y + j[i, 7:9, 1].min().item()
             if current_foot_y + velocity[i, 1].item() <= floor_y:
                 velocity[i, 1] = floor_y - current_foot_y
             current_root_y += velocity[i, 1].item()
