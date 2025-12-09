@@ -178,7 +178,7 @@ class MobilePoser(nn.Module):
         full_pose = full_pose.view(B, S, -1)
         return full_pose
 
-    def _reduced_global_to_full(self, root_rotation, reduced_pose):
+    def _reduced_global_to_full(self, reduced_pose):
         """Convert reduced 6D pose to full 24-joint local rotations."""
         pose = art.math.r6d_to_rotation_matrix(reduced_pose).view(-1, joint_set.n_reduced, 3, 3)
         pred_pose = self._reduced_pose_to_full(pose.unsqueeze(0)).squeeze(0).view(-1, 24, 3, 3)
@@ -228,9 +228,6 @@ class MobilePoser(nn.Module):
         """
         B, T = imu.shape[:2]
 
-        # root rotation 
-        root_rotation = imu[..., 42:51].view(-1, 3, 3)
-
         # forward the joint prediction model
         pred_joints = self.joints(imu) # [B, T, 24*3]
         
@@ -239,7 +236,7 @@ class MobilePoser(nn.Module):
         pred_pose = self.pose(pose_input) # [B, T, 24*6]
 
         # global pose to local
-        pred_pose = self._reduced_global_to_full(root_rotation, pred_pose) # [B*T, 24, 3, 3]
+        pred_pose = self._reduced_global_to_full(pred_pose) # [B*T, 24, 3, 3]
         pred_pose = pred_pose.view(B, T, 24, 3, 3) # [B, T, 24, 3, 3]
         
         # forward the foot-ground contact probability model
