@@ -108,6 +108,15 @@ class MobilePoser(nn.Module):
         # body model
         self.bodymodel = art.model.ParametricModel(paths.smpl_file, device=self.device)
         self.global_to_local_pose = self.bodymodel.inverse_kinematics_R
+
+        # lower body joint
+        j, _ = self.bodymodel.get_zero_pose_joint_and_vertex()
+        b = art.math.joint_position_to_bone_vector(j[joint_set.lower_body].unsqueeze(0),
+                                                   joint_set.lower_body_parent).squeeze(0)
+        bone_orientation, bone_length = art.math.normalize_tensor(b, return_norm=True)
+        b = bone_orientation * bone_length
+        b[:3] = 0
+        self.lower_body_bone = b
         
         # model components
         self.pose = Poser()
@@ -260,10 +269,12 @@ class MobilePoser(nn.Module):
         vel = vel.view(B * T, 24, 3)             # [B*T, 24, 3]
         
         # calculate velocity from foot-ground contact
-        floor_y = self.j[10:12, 1].min().item()
+        j = art.math.forward_kinematics(pose[:, joint_set.lower_body],
+                                        self.lower_body_bone.expand(pose.shape[0], -1, -1),
+                                        joint_set.lower_body_parent)[1]        
         contact_vel = self.gravity_velocity + art.math.lerp(
-            torch.cat([torch.zeros(1, 3).to(self.device), joints[:-1, 10] - joints[1:, 10]]),
-            torch.cat([torch.zeros(1, 3).to(self.device), joints[:-1, 11] - joints[1:, 11]]),
+            torch.cat((torch.zeros(1, 3, device=j.device), j[:-1, 7] - j[1:, 7])),
+            torch.cat((torch.zeros(1, 3, device=j.device), j[:-1, 8] - j[1:, 8])),
             contact.max(dim=1).indices.view(-1, 1)
         )
         
@@ -276,9 +287,10 @@ class MobilePoser(nn.Module):
         velocity = art.math.lerp(pred_vel, contact_vel, weight)
         
         # remove penetration
+        floor_y = self.j[10:12, 1].min().item()
         current_root_y = 0
         for i in range(velocity.shape[0]):
-            current_foot_y = current_root_y + joints[i, 10:12, 1].min().item()
+            current_foot_y = current_root_y + j[i, 7:9, 1].min().item()
             if current_foot_y + velocity[i, 1].item() <= floor_y:
                 velocity[i, 1] = floor_y - current_foot_y
             current_root_y += velocity[i, 1].item()
