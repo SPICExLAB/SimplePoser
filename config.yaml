@@ -31,9 +31,3 @@ window_length: 150
 wandb_project: SimplePoser
 wandb_run_name: rph_30fps_samp
 wandb_group: rightpocket
-
-# semoae config
-semoae_ckpt: "semoae/checkpoints/semoae_best.pt"
-use_semoae: false
-semo_eta: 0.5
-semo_prob: 0.5
