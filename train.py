@@ -7,7 +7,8 @@ from argparse import ArgumentParser
 from model import MobilePoser
 from data import get_dataloaders
 from utils import load_yaml, set_seed
-from loss import compute_vel_loss, compute_jerk_loss
+from loss import compute_vel_loss, compute_jerk_loss, compute_vposer_loss
+from utils import load_vposer
 from config import joint_set
 
 
@@ -68,6 +69,12 @@ def train():
 
     # init model and data
     model = MobilePoser(cfg).to(device)
+
+    # VPoser regularization (optional)
+    vposer = None
+    if cfg.get('use_vposer', False):
+        vposer = load_vposer(cfg['vposer_ckpt'], device)
+        print(f"Loaded VPoser from: {cfg['vposer_ckpt']}")
 
     finetune = cfg.get('pretrained') is not None
     if finetune:
@@ -131,6 +138,12 @@ def train():
                 vel_loss = sum(compute_vel_loss(pred_vel, vel.view(B, T, -1), i) for i in [1, 3, 9])
                 loss += contact_loss
                 loss += 0.5 * vel_loss
+
+            # VPoser regularization loss
+            if vposer is not None:
+                global_to_local = model.global_to_local_pose if cfg.get('use_global_pose', False) else None
+                vposer_loss = compute_vposer_loss(vposer, pred_pose, joint_set.reduced, stride=2, global_to_local_fn=global_to_local)
+                loss += cfg['vposer_weight'] * vposer_loss
 
             # backward 
             optimizer.zero_grad()

@@ -313,12 +313,12 @@ class MobilePoser(nn.Module):
             contact: [2] foot contact probabilities
         """
         imu = data.repeat(self.num_total_frames, 1) if self.imu is None else torch.cat((self.imu[1:], data.view(1, -1))) # [num_total_frames, 60]
-        
-        # forward the pose prediction model
-        pred_pose, pred_joints, pred_vel, pred_contact = self.forward(imu.unsqueeze(0))
+
+        # forward the pose prediction model 
+        pred_pose, pred_joints, pred_vel, pred_contact = self.predict(imu.unsqueeze(0))
 
         # extract current frame
-        pose = pred_pose.view(-1, 24, 3, 3)[self.num_past_frames]   # [24, 3, 3]
+        pose = pred_pose[0, self.num_past_frames]                   # [24, 3, 3]
         joints = pred_joints.view(-1, 24, 3)[self.num_past_frames]  # [24, 3]
         contact = pred_contact.view(-1, 2)[self.num_past_frames]    # [2]
         vel = pred_vel.view(-1, 24, 3)[self.num_past_frames]        # [24, 3]

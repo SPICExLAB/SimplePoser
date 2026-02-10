@@ -4,7 +4,7 @@ A simplified implementation of [MobilePoser](https://github.com/SPICExLAB/Mobile
 
 ## Train 
 ```
-python train.py --config config.yaml
+python train.py --config config.yaml --wandb
 ```
 
 ## Evaluate 

@@ -41,10 +41,10 @@ class PoseDataset(Dataset):
     def _load_data(self):
         data_folder = Path(paths.data_dir) / self.cfg['dataset']
 
-        train_file = data_folder / 'train.pt'
-        test_file = data_folder / 'test.pt'
-
-        if train_file.exists():
+        # check if specific file is specified (useful for debugging)
+        if self.cfg.get('data_file'):
+            data_files = [self.cfg['data_file']]
+        elif (data_folder / 'train.pt').exists():
             # load train or test file (when finetuning models)
             data_files = ['test.pt'] if self.evaluate else ['train.pt']
         else:

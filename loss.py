@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from utils import rotation_matrix_to_axis_angle_differentiable
+
 
 def compute_vel_loss(pred_vel: torch.Tensor, gt_vel: torch.Tensor, n: int=1) -> torch.Tensor:
     """
@@ -64,3 +66,48 @@ def compute_loss(pred_pose, pred_joints, pred_vel, pred_contact,
         'velocity': vel_loss.item(),
         'contact': contact_loss.item()
     }
+
+
+def compute_vposer_loss(vposer, pred_pose_6d: torch.Tensor, reduced_indices: list,
+                        stride: int = 1, global_to_local_fn=None) -> torch.Tensor:
+    """
+    Compute VPoser prior loss: ||z||^2 where z = vposer.encode(pose).mean,
+    encouraging the latent code to stay close to the prior N(0, I).
+
+    Args:
+        vposer: Loaded VPoser model
+        pred_pose_6d: [B, T, n_reduced*6] predicted 6D rotations
+        reduced_indices: list of joint indices in reduced set
+        stride: frame stride for subsampling (default 1 = all frames)
+        global_to_local_fn: function to convert global rotations to local (if using global pose)
+
+    Returns:
+        Scalar tensor, mean squared norm of latent codes
+    """
+    from articulate.math import r6d_to_rotation_matrix
+
+    B = pred_pose_6d.shape[0]
+
+    # subsample frames
+    pred_pose_6d = pred_pose_6d[:, ::stride, :].contiguous()
+    T = pred_pose_6d.shape[1]
+
+    # convert 6D to rotation matrices
+    pred_rotmat = r6d_to_rotation_matrix(pred_pose_6d.view(-1, 6)).view(B, T, -1, 3, 3)
+
+    # scatter reduced joints into full 24-joint pose (identity for missing joints)
+    full_rotmat = torch.eye(3, device=pred_pose_6d.device).expand(B, T, 24, 3, 3).clone()
+    full_rotmat[:, :, reduced_indices] = pred_rotmat
+
+    # convert global to local if needed
+    if global_to_local_fn is not None:
+        full_rotmat = global_to_local_fn(full_rotmat.view(-1, 24, 3, 3)).view(B, T, 24, 3, 3)
+
+    # convert to axis-angle (use differentiable)
+    full_pose_aa = rotation_matrix_to_axis_angle_differentiable(full_rotmat).view(B, T, 24, 3)
+
+    # VPoser expects body joints 1-21 (exclude root and hands 22-23)
+    body_pose_aa = full_pose_aa[:, :, 1:22].contiguous().view(B * T, 63)
+
+    z = vposer.encode(body_pose_aa).mean
+    return (z ** 2).sum(dim=-1).mean()

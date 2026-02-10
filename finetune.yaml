@@ -2,7 +2,7 @@
 seed: 42
 
 # training
-device: cuda:0
+device: cuda:2
 batch_size: 32
 num_epochs: 15
 learning_rate: 0.0001
@@ -22,15 +22,18 @@ past_frames: 40
 future_frames: 5
 use_r6d_input: false
 total_frames: past_frames + future_frames
-pretrained: checkpoints/global_rp_calib_noise/best.pt
+pretrained: checkpoints/rp_amass_30/best.pt
 
 # settings
 use_global_pose: true
 window_length: 150
 
-use_semoae: false
+# vposer regularization
+use_vposer: false
+vposer_ckpt: models/vposer_v1_0
+vposer_weight: 0.0001
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: global_rp_calib_noise
+wandb_run_name: rp_amass_30
 wandb_group: rightpocket

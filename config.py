@@ -21,7 +21,7 @@ datasets = {
 
 # device-location combinations
 combos = {
-    'global': [0, 1, 2, 3, 4],
+    # 'global': [0, 1, 2, 3, 4],
     # 'lw_rp_h': [0, 3, 4],
     # 'rw_rp_h': [1, 3, 4],
     # 'lw_lp_h': [0, 2, 4],

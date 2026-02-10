@@ -10,10 +10,9 @@ num_workers: 0
 dropout: 0.4
 
 # data configs
-dataset: AMASS
+dataset: IMUPoser
 target_fps: 30
 add_noise: true
-data_file: AMASS.pt
 
 # output directory
 output_dir: checkpoints
@@ -27,13 +26,3 @@ total_frames: past_frames + future_frames
 use_global_pose: true
 use_r6d_input: false
 window_length: 150
-
-# wandb
-wandb_project: SimplePoser
-wandb_run_name: rp_amass_vposer_30
-wandb_group: rightpocket
-
-# vposer regularization
-use_vposer: true
-vposer_ckpt: models/vposer_v1_0
-vposer_weight: 0.001
