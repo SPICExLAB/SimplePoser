@@ -12,8 +12,8 @@ from utils import load_yaml
 
 
 class PoseEvaluator:
-    def __init__(self):
-        self._eval_fn = art.FullMotionEvaluator(paths.smpl_file, joint_mask=torch.tensor([2, 5, 16, 20]), fps=fps)
+    def __init__(self, device='cpu'):
+        self._eval_fn = art.FullMotionEvaluator(paths.smpl_file, joint_mask=torch.tensor([2, 5, 16, 20], device=device), fps=fps, device=device)
 
     def eval(self, pose_p, pose_t, tran_p=None, tran_t=None):
         pose_p = pose_p.clone().view(-1, 24, 3, 3)
@@ -49,7 +49,7 @@ def evaluate_pose(model, dataset, num_future_frame=5):
     ])
 
     # setup Pose Evaluator
-    evaluator = PoseEvaluator()
+    evaluator = PoseEvaluator(device=device)
 
     # track errors
     offline_errs, online_errs = [], []
