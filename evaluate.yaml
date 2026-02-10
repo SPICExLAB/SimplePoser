@@ -12,7 +12,7 @@ dropout: 0.4
 # data configs
 dataset: IMUPoser
 target_fps: 30
-add_noise: true
+add_noise: false
 
 # output directory
 output_dir: checkpoints

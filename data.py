@@ -8,7 +8,6 @@ from tqdm import tqdm
 from pathlib import Path
 
 import articulate as art
-from imu_synthesis import syn_imu_from_smpl
 from config import combos, paths, acc_scale, vel_scale, fps, joint_set, datasets
 
 
@@ -75,6 +74,7 @@ class PoseDataset(Dataset):
 
            # synthesize IMU with calibration error
             if self.cfg['add_noise'] and not self.evaluate:
+                from imu_synthesis import syn_imu_from_smpl
                 acc, gyro, ori = syn_imu_from_smpl(pose, tran)
                 acc = acc.cpu()
                 gyro = gyro.cpu()
