@@ -94,7 +94,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load cfg
-    cfg = load_yaml('config.yaml')
+    cfg = load_yaml('evaluate.yaml')
 
     # load model
     model = MobilePoser.from_pretrained(cfg, args.weights).to(cfg['device'])
