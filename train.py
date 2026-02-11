@@ -25,10 +25,10 @@ def evaluate(model, val_loader, device, finetune=False):
         pose_6d = pose_6d.view(B, T, 24, 6)[:, :, joint_set.reduced].view(B, T, -1)
         
         pred_pose, pred_joints, pred_vel, pred_contact = model(imu)
-        
-        joints_loss = nn.MSELoss()(pred_joints, joints.view(B, T, -1))
+
         pose_loss = nn.MSELoss()(pred_pose, pose_6d)
-        loss = joints_loss + pose_loss
+        joints_loss = nn.MSELoss()(pred_joints, joints)  # both [B, T, 24, 3]
+        loss = pose_loss + joints_loss
         
         if not finetune:
             vel = vel.to(device)
@@ -103,30 +103,18 @@ def train():
             B, T = pose_6d.shape[:2]
             pose_6d = pose_6d.view(B, T, 24, 6)[:, :, joint_set.reduced].view(B, T, -1)
 
-            # add noise to GT joints for downstream modules
-            pose_noise = torch.randn_like(joints) * 0.04
-            contact_noise = torch.randn_like(joints) * 0.04
-            vel_noise = torch.randn_like(joints) * 0.025
-            
-            noisy_joints_pose = (joints + pose_noise).view(B, T, -1)
-            noisy_joints_contact = (joints + contact_noise).view(B, T, -1)
-            noisy_joints_vel = (joints + vel_noise).view(B, T, -1)
-            
-            # train each module independently like MobilePoser 
-            pred_joints = model.joints(imu)
-            pred_pose = model.pose(torch.cat([noisy_joints_pose, imu], dim=-1))
+            # forward pass (joints derived from pose via FK)
+            pred_pose, pred_joints, pred_vel, pred_contact = model(imu)
 
             # compute losses
-            joints_loss = nn.MSELoss()(pred_joints, joints.view(B, T, -1))
             pose_loss = nn.MSELoss()(pred_pose, pose_6d)
+            joints_loss = nn.MSELoss()(pred_joints, joints)  # FK joints vs GT joints
             pose_jerk_loss = compute_jerk_loss(pred_pose)
-            joints_jerk_loss = compute_jerk_loss(pred_joints)
-            loss = joints_loss + pose_loss + 1e-5 * (pose_jerk_loss + joints_jerk_loss)
-            
+            joints_jerk_loss = compute_jerk_loss(pred_joints.view(B, T, -1))
+            loss = pose_loss + joints_loss + 1e-5 * (pose_jerk_loss + joints_jerk_loss)
+
             # compute contact and velocity losses
             if not finetune:
-                pred_contact = model.foot_contact(torch.cat([noisy_joints_contact, imu], dim=-1))
-                pred_vel = model.velocity(torch.cat([noisy_joints_vel, imu], dim=-1))
                 contact_loss = nn.BCEWithLogitsLoss()(pred_contact, contact)
                 vel_loss = sum(compute_vel_loss(pred_vel, vel.view(B, T, -1), i) for i in [1, 3, 9])
                 loss += contact_loss

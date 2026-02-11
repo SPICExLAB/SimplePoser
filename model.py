@@ -79,32 +79,18 @@ class RNNWithInit(RNN):
 
 
 
-class Joints(nn.Module):
-    """
-    Input: IMU
-    Output: 24 joint positions
-    """
-    def __init__(self):
-        super().__init__()
-        self.rnn = RNN(joint_set.n_imu, joint_set.n_full * 3, 256)
-
-    def forward(self, x):
-        joints, _ = self.rnn(x)
-        return joints # [T, 24 * 3]
-
-
 class Poser(nn.Module):
     """
-    Input: IMU + joints
+    Input: IMU
     Output: SMPL pose (6D rotations)
     """
     def __init__(self):
         super().__init__()
-        self.rnn = RNN(joint_set.n_full * 3 + joint_set.n_imu, joint_set.n_reduced * 6, 256)
+        self.rnn = RNN(joint_set.n_imu, joint_set.n_reduced * 6, 256)
 
     def forward(self, x):
         pose, _ = self.rnn(x)
-        return pose # [T, 24 * 6]
+        return pose # [T, 16 * 6]
 
 
 class FootContact(nn.Module):
@@ -170,7 +156,6 @@ class MobilePoser(nn.Module):
         
         # model components
         self.pose = Poser()
-        self.joints = Joints()
         self.foot_contact = FootContact()
         self.velocity = Velocity()
         
@@ -243,25 +228,28 @@ class MobilePoser(nn.Module):
         Args:
             imu: [B, T, 60] IMU features
         Returns:
-            pred_pose: [B, T, 24*6] 6D rotations (raw)
-            pred_joints: [B, T, 24*3] joint positions  
+            pred_pose: [B, T, 16*6] 6D rotations (raw)
+            pred_joints: [B, T, 24, 3] joint positions (from FK)
             pred_vel: [B, T, 24*3] joint velocities
             foot_contact: [B, T, 2] foot contact logits
         """
-        # predict joints from IMU
-        pred_joints = self.joints(imu)  # [B, T, 24*3]
-        
-        # predict pose from joints + IMU
-        pose_input = torch.cat([pred_joints, imu], dim=-1)
-        pred_pose = self.pose(pose_input)  # [B, T, len(reduced_joint_set)*6]
-        
-        # predict foot contact from joints + IMU  
-        tran_input = torch.cat([pred_joints, imu], dim=-1)
+        B, T = imu.shape[:2]
+
+        # predict pose directly from IMU
+        pred_pose = self.pose(imu)  # [B, T, 16*6]
+
+        # derive joints from pose via FK
+        pose_rotmat = self._reduced_global_to_full(pred_pose)  # [B*T, 24, 3, 3]
+        _, pred_joints = self.bodymodel.forward_kinematics(pose_rotmat)  # [B*T, 24, 3]
+        pred_joints = pred_joints.view(B, T, 24, 3)  # [B, T, 24, 3]
+
+        # predict foot contact from joints + IMU
+        tran_input = torch.cat([pred_joints.view(B, T, -1), imu], dim=-1)
         foot_contact = self.foot_contact(tran_input)  # [B, T, 2]
-        
+
         # predict velocity from joints + IMU
         pred_vel = self.velocity(tran_input)  # [B, T, 24*3]
-        
+
         return pred_pose, pred_joints, pred_vel, foot_contact
 
     def predict(self, imu):
@@ -271,30 +259,28 @@ class MobilePoser(nn.Module):
             imu: [B, T, 60] IMU features
         Returns:
             pred_pose: [B, T, 24, 3, 3] local rotations
-            pred_joints: [B, T, 24*3] joint positions
-            pred_vel: [B, T, 24*3] joint velocities  
+            pred_joints: [B, T, 24, 3] joint positions (from FK)
+            pred_vel: [B, T, 24*3] joint velocities
             foot_contact: [B, T, 2] foot contact probabilities
         """
         B, T = imu.shape[:2]
 
-        # forward the joint prediction model
-        pred_joints = self.joints(imu) # [B, T, 24*3]
-        
-        # forward the pose prediction model
-        pose_input = torch.cat([pred_joints, imu], dim=-1)
-        pred_pose = self.pose(pose_input) # [B, T, 24*6]
+        # predict pose directly from IMU
+        pred_pose = self.pose(imu)  # [B, T, 16*6]
 
-        # global pose to local
-        pred_pose = self._reduced_global_to_full(pred_pose) # [B*T, 24, 3, 3]
-        pred_pose = pred_pose.view(B, T, 24, 3, 3) # [B, T, 24, 3, 3]
-        
-        # forward the foot-ground contact probability model
-        tran_input = torch.cat([pred_joints, imu], dim=-1)
-        foot_contact = self.foot_contact(tran_input) # [B, T, 2]
-        
-        # forward the foot-joint velocity model
-        pred_vel = self.velocity(tran_input) # [B, T, 24*3]
-        
+        # convert to rotation matrices and get joints via FK
+        pred_pose = self._reduced_global_to_full(pred_pose)  # [B*T, 24, 3, 3]
+        _, pred_joints = self.bodymodel.forward_kinematics(pred_pose)  # [B*T, 24, 3]
+        pred_pose = pred_pose.view(B, T, 24, 3, 3)  # [B, T, 24, 3, 3]
+        pred_joints = pred_joints.view(B, T, 24, 3)  # [B, T, 24, 3]
+
+        # predict foot contact from joints + IMU
+        tran_input = torch.cat([pred_joints.view(B, T, -1), imu], dim=-1)
+        foot_contact = self.foot_contact(tran_input)  # [B, T, 2]
+
+        # predict velocity from joints + IMU
+        pred_vel = self.velocity(tran_input)  # [B, T, 24*3]
+
         return pred_pose, pred_joints, pred_vel, foot_contact
 
     @torch.no_grad()
