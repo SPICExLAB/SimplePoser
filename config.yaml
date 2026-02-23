@@ -2,9 +2,9 @@
 seed: 42
 
 # training
-device: cuda:0
+device: cuda:1
 batch_size: 256
-num_epochs: 130
+num_epochs: 180
 learning_rate: 0.001
 num_workers: 0
 dropout: 0.4
@@ -13,7 +13,6 @@ dropout: 0.4
 dataset: AMASS
 target_fps: 30
 add_noise: true
-data_file: AMASS.pt
 
 # output directory
 output_dir: checkpoints
@@ -30,5 +29,5 @@ window_length: 150
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: rp_amass_30
-wandb_group: rightpocket
+wandb_run_name: dynaip_fkloss
+wandb_group: dynaip

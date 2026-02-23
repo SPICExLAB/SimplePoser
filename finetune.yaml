@@ -22,7 +22,7 @@ past_frames: 40
 future_frames: 5
 use_r6d_input: false
 total_frames: past_frames + future_frames
-pretrained: checkpoints/rp_amass_30/best.pt
+pretrained: checkpoints/rp_amass_30_3combo/latest.pt
 
 # settings
 use_global_pose: true
@@ -30,5 +30,5 @@ window_length: 150
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: rp_amass_30
+wandb_run_name: rp_amass_30_3combo
 wandb_group: rightpocket

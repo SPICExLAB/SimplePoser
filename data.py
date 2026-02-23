@@ -20,9 +20,6 @@ class PoseDataset(Dataset):
         self.combos = combos
         self.bodymodel = art.model.ParametricModel(paths.smpl_file)
 
-        source_fps = datasets[cfg['dataset']]['fps'] # downsample, if necessary
-        self.step = max(1, round(source_fps / cfg['target_fps']))
-
         self.data = {
             'imu_inputs': [],
             'pose_outputs': [],
@@ -55,9 +52,13 @@ class PoseDataset(Dataset):
         # process each data file
         for data_file in tqdm(data_files):
             file_data = torch.load(data_folder / data_file, map_location=torch.device('cpu'), weights_only=True)
-            self._process_file(file_data)
+            # determine downsample step per-file (e.g., AMASS.pt → 60fps, IMUPoser.pt → 30fps)
+            dataset_name = Path(data_file).stem
+            source_fps = datasets.get(dataset_name, {}).get('fps', self.cfg['target_fps'])
+            step = max(1, round(source_fps / self.cfg['target_fps']))
+            self._process_file(file_data, step)
 
-    def _process_file(self, file_data: dict):
+    def _process_file(self, file_data: dict, step: int = 1):
         accs, oris, poses, trans = file_data['acc'], file_data['ori'], file_data['pose'], file_data['tran']
         joints = file_data.get('joint', [None] * len(poses))
         foots = file_data.get('contact', [None] * len(poses))
@@ -94,12 +95,12 @@ class PoseDataset(Dataset):
             foot = foot.view(-1, 2) if foot is not None else None  # (N, 2)
 
             # downsample, if necessary
-            acc = acc[::self.step] / acc_scale # scale the acc to be in range [-1, 1]
-            ori = ori[::self.step]
-            pose = pose[::self.step]
-            tran = tran[::self.step]
-            joint = joint[::self.step]
-            foot = foot[::self.step] if foot is not None else None
+            acc = acc[::step] / acc_scale # scale the acc to be in range [-1, 1]
+            ori = ori[::step]
+            pose = pose[::step]
+            tran = tran[::step]
+            joint = joint[::step]
+            foot = foot[::step] if foot is not None else None
 
             self._process_data(acc, ori, pose, joint, tran, foot)
 
@@ -129,9 +130,10 @@ class PoseDataset(Dataset):
             self.data['joint_outputs'].extend(torch.split(joint, window))
             self.data['tran_outputs'].extend(torch.split(tran, window))
             
-            # compute velocities from positions
+            # compute velocities from positions (root-relative for non-root joints)
             root_vel = torch.cat([torch.zeros(1, 3), tran[1:] - tran[:-1]])
             vel = torch.cat([torch.zeros(1, 24, 3), torch.diff(joint, dim=0)])
+            vel[:, 1:] = vel[:, 1:] - vel[:, :1]
             vel[:, 0] = root_vel
             vel = vel * (fps / vel_scale)
             

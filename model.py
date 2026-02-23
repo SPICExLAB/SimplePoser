@@ -29,56 +29,6 @@ class RNN(torch.nn.Module):
         return self.linear2(pad_packed_sequence(x, batch_first=True)[0]), h
 
 
-
-class RNNWithInit(RNN):
-    r"""
-    RNN with the initial hidden states regressed from the first output.
-    """
-    def __init__(self, input_size: int, output_size: int, hidden_size: int, num_rnn_layer: int,
-                 rnn_type='lstm', bidirectional=False, dropout=0., load_weight_file: str = None):
-        r"""
-        Init an RNNWithInit net.
-
-        :param input_size: Input size.
-        :param output_size: Output size.
-        :param hidden_size: Hidden size for RNN.
-        :param num_rnn_layer: Number of RNN layers.
-        :param rnn_type: Select from 'rnn', 'lstm', 'gru'.
-        :param bidirectional: Whether if the RNN is bidirectional.
-        :param dropout: Dropout after the input linear layer and in the rnn.
-        :param load_weight_file: If not None and exists, weights will be loaded.
-        """
-        assert rnn_type == 'lstm' and bidirectional is False
-        super().__init__(input_size, output_size, hidden_size, num_rnn_layer, rnn_type, bidirectional, dropout)
-
-        self.init_net = torch.nn.Sequential(
-            torch.nn.Linear(output_size, hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, hidden_size * num_rnn_layer),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size * num_rnn_layer, 2 * (2 if bidirectional else 1) * num_rnn_layer * hidden_size)
-        )
-
-        if load_weight_file and os.path.exists(load_weight_file):
-            self.load_state_dict(torch.load(load_weight_file))
-            self.eval()
-
-    def forward(self, x, _=None):
-        r"""
-        Forward.
-
-        :param x: A list in length [batch_size] which contains 2-tuple
-                  (Tensor[num_frames, input_size], Tensor[output_size]).
-        :param _: Not used.
-        :return: A list in length [batch_size] which contains tensors in shape [num_frames, output_size].
-        """
-        x, x_init = list(zip(*x))
-        nd, nh = self.rnn.num_layers * (2 if self.rnn.bidirectional else 1), self.rnn.hidden_size
-        h, c = self.init_net(torch.stack(x_init)).view(-1, 2, nd, nh).permute(1, 2, 0, 3)
-        return super(RNNWithInit, self).forward(x, (h, c))
-
-
-
 class Joints(nn.Module):
     """
     Input: IMU
