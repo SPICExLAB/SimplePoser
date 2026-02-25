@@ -11,12 +11,9 @@ def r6d_to_local(pred_pose, global_to_local_pose):
     Returns:
         local: [N, 24, 3, 3] local rotation matrices
     """
-    shape = pred_pose.shape
     pose = art.math.r6d_to_rotation_matrix(pred_pose).view(-1, joint_set.n_reduced, 3, 3)
-
     full = torch.eye(3, device=pose.device).expand(pose.shape[0], 24, 3, 3).clone()
     full[:, joint_set.reduced] = pose
-
     local = global_to_local_pose(full)
     local[:, joint_set.ignored] = torch.eye(3, device=pose.device)
     local[:, 0] = pose[:, 0]

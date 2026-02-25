@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from config import paths, joint_set, fps
 import articulate as art
 from data import PoseDataset
-from dynaip.dynaip import DynaIP
+from dynaip import MODEL_REGISTRY
 from utils import load_yaml
 
 
@@ -27,7 +27,7 @@ class PoseEvaluator:
         for i, name in enumerate([
             'SIP Error (deg)', 'Angular Error (deg)', 'Masked Angular Error (deg)',
             'Positional Error (cm)', 'Masked Positional Error (cm)', 'Mesh Error (cm)',
-            'Jitter Error (100m/s^3)',
+            'Jitter Error (100m/s^3)'
         ]):
             print('%s: %.2f (+/- %.2f)' % (name, errors[i, 0], errors[i, 1]))
 
@@ -42,10 +42,10 @@ def evaluate_pose(model, dataset, cfg):
     for imu, pose_6d, joint, tran, vel, contact in tqdm.tqdm(dataset):
         imu = imu.to(device)
         pose_t = art.math.r6d_to_rotation_matrix(pose_6d.to(device))
-        pose_p = model.predict(imu.unsqueeze(0))
+        pose_p, _, _ = model.predict(imu.unsqueeze(0))
         errs.append(evaluator.eval(pose_p.squeeze(0), pose_t))
 
-    print('============== results ================')
+    print('============== average =================')
     evaluator.print(torch.stack(errs).mean(dim=0))
 
 
@@ -58,7 +58,8 @@ if __name__ == '__main__':
     cfg = load_yaml(args.config)
     device = cfg['device']
 
-    model = DynaIP(device=device).to(device)
+    ModelClass = MODEL_REGISTRY[cfg.get('model', 'dynaip')]
+    model = ModelClass(device=device).to(device)
     checkpoint = torch.load(args.weights, map_location=device, weights_only=True)
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])

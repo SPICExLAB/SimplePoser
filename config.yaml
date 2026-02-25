@@ -10,7 +10,7 @@ num_workers: 0
 dropout: 0.4
 
 # data configs
-dataset: AMASS
+dataset: Train
 target_fps: 30
 add_noise: true
 
@@ -18,6 +18,7 @@ add_noise: true
 output_dir: checkpoints
 
 # model config
+model: dynaip
 past_frames: 40
 future_frames: 5
 total_frames: past_frames + future_frames
@@ -25,9 +26,9 @@ total_frames: past_frames + future_frames
 # settings
 use_global_pose: true
 use_r6d_input: false
-window_length: 150
+window_length: 300
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: dynaip_fkloss
+wandb_run_name: dynaip
 wandb_group: dynaip
