@@ -2,7 +2,7 @@
 seed: 42
 
 # training
-device: cuda:1
+device: cuda:0
 batch_size: 256
 num_epochs: 180
 learning_rate: 0.001
@@ -30,5 +30,5 @@ window_length: 300
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: dynaip
+wandb_run_name: dynaip_wout_head
 wandb_group: dynaip

@@ -16,13 +16,15 @@ datasets = {
     'DIP_IMU':      {'fps': 60},
     'IMUPoser':     {'fps': 30},
     'TotalCapture': {'fps': 60},
+    'SAMP':         {'fps': 60},
+    'Nymeria':      {'fps': 50},
 }
 
 
 # device-location combinations
 combos = {
-    'global': [0, 1, 2, 3, 4],
-    # 'lw_rw_lp_rp': [0, 1, 2, 3],
+    # 'global': [0, 1, 2, 3, 4],
+    'lw_rw_lp_rp': [0, 1, 2, 3],
     # 'lw_rp_h': [0, 3, 4],
     # 'rw_rp_h': [1, 3, 4],
     # 'lw_lp_h': [0, 2, 4],
@@ -57,6 +59,9 @@ class paths:
 
     raw_imuposer_dir = '/data/projects/Pose/raw/IMUPoser'          # raw IMUPoser dataset path (raw_imuposer_dir/P1/*.pkl)
     imuposer_dir = '/data/projects/Pose/dataset_work/IMUPoser'          # output path for the preprocessed IMUPoser dataset
+
+    raw_nymeria_dir = '/data/datasets/processed_data_body_ty'                # raw Nymeria dataset (train/ and test/ with .pkl files)
+    nymeria_dir = '/data/projects/Pose/dataset_work/Nymeria'            # output path for preprocessed Nymeria dataset
 
     example_dir = 'data/example'                    # example IMU measurements
     smpl_file = 'models/SMPL_male.pkl'              # official SMPL model path

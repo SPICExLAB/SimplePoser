@@ -1,5 +1,5 @@
 r"""
-    Preprocess DIP-IMU and TotalCapture test dataset.
+    Preprocess DIP-IMU, TotalCapture, IMUPoser, and Nymeria datasets.
     Synthesize AMASS dataset.
 
     Please refer to the `paths` in `config.py` and set the path of each dataset correctly.
@@ -9,12 +9,19 @@ r"""
 import articulate as art
 import torch
 import os
+import sys
 import pickle
 import numpy as np
 from tqdm import tqdm
 import glob
 
 from config import paths, amass_data
+
+
+# fix to a stupid problem
+if 'numpy._core' not in sys.modules:
+    sys.modules['numpy._core'] = np.core
+    sys.modules['numpy._core.multiarray'] = np.core.multiarray
 
 
 # left wrist, right wrist, left thigh, right thigh, head, pelvis
@@ -24,11 +31,10 @@ ji_mask = torch.tensor([18, 19, 1, 2, 15, 0])
 body_model = art.ParametricModel(paths.smpl_file)
 
 
-def _syn_acc(v, smooth_n=4):
+def _syn_acc(v, fps=60, smooth_n=4):
     r"""
     Synthesize accelerations from vertex positions.
     """
-    fps = 30
     mid = smooth_n // 2
     acc = torch.stack([(v[i] + v[i + 2] - 2 * v[i + 1]) * (fps**2) for i in range(0, v.shape[0] - 2)])
     acc = torch.cat((torch.zeros_like(acc[:1]), acc, torch.zeros_like(acc[:1])))
@@ -37,6 +43,7 @@ def _syn_acc(v, smooth_n=4):
             [(v[i] + v[i + smooth_n * 2] - 2 * v[i + smooth_n]) * (fps**2) / smooth_n ** 2
                 for i in range(0, v.shape[0] - smooth_n * 2)])
     return acc
+
 
 def _foot_ground_probs(joint):
     r"""
@@ -285,8 +292,93 @@ def process_imuposer(split: str="train"):
 
 
 
+def process_nymeria():
+    r"""
+    Preprocess Nymeria dataset. Converts Xsens poses to SMPL and synthesizes virtual IMU data.
+    """
+    XSENS_TO_SMPL = [0, 19, 15, 1, 20, 16, 3, 21, 17, 4, 22, 18,
+                     5, 11, 7, 6, 12, 8, 13, 9, 13, 9, 13, 9]
+
+    def xsens_to_smpl(xsens_rotmat):
+        perm = [1, 2, 0]
+        xsens_rotmat = xsens_rotmat[:, :, perm, :]
+        xsens_rotmat = xsens_rotmat[:, :, :, perm]
+        if not isinstance(xsens_rotmat, torch.Tensor):
+            xsens_rotmat = torch.from_numpy(xsens_rotmat).float()
+        else:
+            xsens_rotmat = xsens_rotmat.float()
+        Rx90 = torch.tensor([[1., 0., 0.], [0., 0., -1.], [0., 1., 0.]])
+        Rz90 = torch.tensor([[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]])
+        xsens_rotmat = Rz90 @ (Rx90 @ xsens_rotmat)
+        smpl_rotmat = torch.eye(3).repeat(xsens_rotmat.shape[0], 24, 1, 1)
+        for smpl_idx, xsens_idx in enumerate(XSENS_TO_SMPL):
+            smpl_rotmat[:, smpl_idx] = xsens_rotmat[:, xsens_idx]
+        return smpl_rotmat
+
+    os.makedirs(paths.nymeria_dir, exist_ok=True)
+    for pkl_fname in tqdm(sorted(glob.glob(os.path.join(paths.raw_nymeria_dir, '*.pkl')))):
+        print('\rReading', pkl_fname)
+        with open(pkl_fname, 'rb') as f:
+            raw = pickle.load(f)
+
+        if 'gt_data' not in raw or 'xsens_pose' not in raw['gt_data']:
+            print('\tskipping (no xsens_pose)'); continue
+
+        xsens_pose = raw['gt_data']['xsens_pose']  # (N, 23, 4, 4)
+        if isinstance(xsens_pose, np.ndarray):
+            xsens_pose = torch.from_numpy(xsens_pose).float()
+
+        N = xsens_pose.shape[0]
+        if N <= 12: print('\tdiscard one sequence with length', N); continue
+
+        # extract root translation and joint rotations
+        tran = xsens_pose[:, 0, :3, 3].contiguous().clone()
+        xsens_rot = xsens_pose[:, :, :3, :3].contiguous().clone()
+
+        # Xsens -> SMPL global rotations -> local rotations via IK
+        global_rot = xsens_to_smpl(xsens_rot)
+        pose = body_model.inverse_kinematics_R(global_rot).view(N, 24, 3, 3)
+
+        # forward kinematics in chunks to avoid OOM
+        shape = torch.zeros(10)
+        CHUNK = 1000
+        all_grot, all_joint, all_vert = [], [], []
+        for i in range(0, N, CHUNK):
+            g, j, v = body_model.forward_kinematics(
+                pose[i:i+CHUNK], shape, tran[i:i+CHUNK], calc_mesh=True
+            )
+            all_grot.append(g)
+            all_joint.append(j)
+            all_vert.append(v[:, vi_mask])
+            del g, j, v
+        grot = torch.cat(all_grot)
+        joint = torch.cat(all_joint)
+        vert = torch.cat(all_vert)
+        del all_grot, all_joint, all_vert
+
+        # synthesize noisy IMU signals
+        from imu_synthesis import _syn_imu, device as imu_device
+        a_sim, _, R_sim = _syn_imu(vert.to(imu_device), grot[:, ji_mask].to(imu_device))
+
+        data = {
+            'pose': pose.clone(),                          # N, 24, 3, 3
+            'shape': shape.clone(),                        # 10
+            'tran': tran.clone(),                          # N, 3
+            'joint': joint[:, :24].contiguous().clone(),   # N, 24, 3
+            'acc': a_sim.cpu(),                            # N, 6, 3
+            'ori': R_sim.cpu(),                            # N, 6, 3, 3
+            'contact': _foot_ground_probs(joint).clone(),  # N, 2
+        }
+        out_name = os.path.splitext(os.path.basename(pkl_fname))[0] + '.pt'
+        torch.save(data, os.path.join(paths.nymeria_dir, out_name))
+        print(f'\tSaved {out_name} ({N} frames)')
+
+    print('Preprocessed Nymeria dataset is saved at', paths.nymeria_dir)
+
+
 if __name__ == '__main__':
     # process_amass()
     # process_dipimu(split='train')
     # process_totalcapture()
-    process_imuposer(split='test')
+    # process_imuposer(split='test')
+    process_nymeria()

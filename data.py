@@ -1,3 +1,4 @@
+import random
 import numpy as np
 import torch
 torch.set_printoptions(sci_mode=False)
@@ -7,7 +8,7 @@ from tqdm import tqdm
 from pathlib import Path
 
 import articulate as art
-from config import combos, paths, acc_scale, vel_scale, fps, joint_set, datasets
+from config import combos, paths, acc_scale, joint_set, datasets
 
 
 class PoseDataset(Dataset):
@@ -47,14 +48,15 @@ class PoseDataset(Dataset):
         else:
             data_files = self._get_data_files(data_folder)
 
-        print(f"Loading {data_files} from {data_folder}")
+        # print(f"Loading {data_files} from {data_folder}. Number of sequences: {len(data_files)}")
+        print(f"Loading {len(data_files)} sequences from {data_folder}.")
 
         for data_file in tqdm(data_files):
             file_data = torch.load(data_folder / data_file, map_location=torch.device('cpu'), weights_only=True)
             dataset_name = Path(data_file).stem
             source_fps = datasets.get(dataset_name, {}).get('fps', self.cfg['target_fps'])
-            step = max(1, round(source_fps / self.cfg['target_fps']))
-            self._process_file(dataset_name, file_data, step)
+            print(f"Dataset: {dataset_name} | Source FPS: {source_fps} | Target FPS: {self.cfg['target_fps']}")
+            self._process_file(dataset_name, file_data, source_fps)
 
     def _compute_stationary_labels(self, joint, tran, dt):
         """
@@ -86,10 +88,20 @@ class PoseDataset(Dataset):
 
         return stationary, root_vel
 
-    def _process_file(self, dataset_name: str, file_data: dict, step: int = 1):
-        accs, oris, poses, trans = file_data['acc'], file_data['ori'], file_data['pose'], file_data['tran']
-        joints = file_data.get('joint', [None] * len(poses))
-        foots = file_data.get('contact', [None] * len(poses))
+    @staticmethod
+    def _wrap_list(x):
+        """Wrap a raw tensor in a list so iteration yields whole sequences (for Nymeria)."""
+        if isinstance(x, torch.Tensor) and x.dim() >= 2:
+            return [x]
+        return x
+
+    def _process_file(self, dataset_name: str, file_data: dict, source_fps: float):
+        accs = self._wrap_list(file_data['acc'])
+        oris = self._wrap_list(file_data['ori'])
+        poses = self._wrap_list(file_data['pose'])
+        trans = self._wrap_list(file_data['tran'])
+        joints = self._wrap_list(file_data.get('joint', [None] * len(poses)))
+        foots = self._wrap_list(file_data.get('contact', [None] * len(poses)))
 
         pbar = tqdm(
             enumerate(zip(accs, oris, poses, trans, joints, foots)),
@@ -120,13 +132,19 @@ class PoseDataset(Dataset):
             tran = tran.view(-1, 3)
             foot = foot.view(-1, 2) if foot is not None else None
 
-            # downsample
-            acc = acc[::step] / acc_scale
-            ori = ori[::step]
-            pose = pose[::step]
-            tran = tran[::step]
-            joint = joint[::step]
-            foot = foot[::step] if foot is not None else None
+            # downsample to target fps 
+            target_fps = self.cfg['target_fps']
+            n_frames = len(acc)
+            n_target = int(n_frames * target_fps / source_fps)
+            sample_idx = torch.round(torch.arange(n_target) * source_fps / target_fps).long()
+            sample_idx = sample_idx.clamp(max=n_frames - 1)
+
+            acc = acc[sample_idx] / acc_scale
+            ori = ori[sample_idx]
+            pose = pose[sample_idx]
+            tran = tran[sample_idx]
+            joint = joint[sample_idx]
+            foot = foot[sample_idx] if foot is not None else None
 
             self._process_data(acc, ori, pose, joint, tran, foot)
 
@@ -154,11 +172,9 @@ class PoseDataset(Dataset):
             self.data['joint_outputs'].extend(torch.split(joint, window))
             self.data['tran_outputs'].extend(torch.split(tran, window))
 
-            # per-joint velocities
-            vel = torch.cat([torch.zeros(1, 24, 3), torch.diff(joint, dim=0)])
-            vel[:, 1:] = vel[:, 1:] - vel[:, :1]
-            vel[:, 0] = torch.cat([torch.zeros(1, 3), tran[1:] - tran[:-1]])
-            vel = vel * (fps / vel_scale)
+            # per-joint velocities in m/s (root-relative)
+            vel = torch.zeros_like(joint)                 # [T, 24, 3]
+            vel[1:] = (joint[1:] - joint[:-1]) / dt       # m/s
 
             if not self.evaluate:
                 self.data['vel_outputs'].extend(torch.split(vel, window))
@@ -175,6 +191,44 @@ class PoseDataset(Dataset):
                     else [None] * len(torch.split(imu, window))
                 )
 
+    # =========================================================================
+    # On-the-fly sensor masking alternative (uncomment to replace _process_data)
+    # Stores data once with all sensors; masking happens in __getitem__.
+    # Dataset is 1x instead of Nx combos — faster loading, less memory.
+    # =========================================================================
+    # def _process_data(self, acc, ori, pose, joint, tran, foot):
+    #     use_r6d = self.cfg['use_r6d_input']
+    #     dt = 1.0 / self.cfg['target_fps']
+    #     stationary, root_vel = self._compute_stationary_labels(joint, tran, dt)
+    #
+    #     # Convert ori once (no combo loop)
+    #     if use_r6d:
+    #         ori = art.math.rotation_matrix_to_r6d(ori).view(-1, 5, 6)
+    #     imu = torch.cat([acc.flatten(1), ori.flatten(1)], dim=1)
+    #     window = len(imu) if self.evaluate else self.cfg['window_length']
+    #
+    #     self.data['imu_inputs'].extend(torch.split(imu, window))
+    #     self.data['pose_outputs'].extend(torch.split(pose, window))
+    #     self.data['joint_outputs'].extend(torch.split(joint, window))
+    #     self.data['tran_outputs'].extend(torch.split(tran, window))
+    #
+    #     vel = torch.zeros_like(joint)
+    #     vel[1:] = (joint[1:] - joint[:-1]) / dt
+    #     if not self.evaluate:
+    #         self.data['vel_outputs'].extend(torch.split(vel, window))
+    #         self.data['foot_outputs'].extend(
+    #             torch.split(foot, window) if foot is not None
+    #             else [None] * len(torch.split(imu, window))
+    #         )
+    #         self.data['stationary_outputs'].extend(
+    #             torch.split(stationary, window) if stationary is not None
+    #             else [None] * len(torch.split(imu, window))
+    #         )
+    #         self.data['root_vel_outputs'].extend(
+    #             torch.split(root_vel, window) if root_vel is not None
+    #             else [None] * len(torch.split(imu, window))
+    #         )
+
     def __len__(self):
         return len(self.data['imu_inputs'])
 
@@ -182,6 +236,18 @@ class PoseDataset(Dataset):
         imu = self.data['imu_inputs'][idx].float()
         joint = self.data['joint_outputs'][idx].float()
         tran = self.data['tran_outputs'][idx].float()
+
+        # --- On-the-fly sensor masking (use with the alternative _process_data above) ---
+        # if not self.evaluate:
+        #     combo = random.choice(list(combos.values()))
+        #     sensor_mask = torch.zeros(5)
+        #     sensor_mask[combo] = 1.0
+        #     ori_dim = 6 if self.cfg['use_r6d_input'] else 9
+        #     imu_mask = torch.cat([
+        #         sensor_mask.repeat_interleave(3),        # acc: 5 sensors × 3
+        #         sensor_mask.repeat_interleave(ori_dim),  # ori: 5 sensors × 6 or 9
+        #     ])
+        #     imu = imu * imu_mask
 
         pose_6d = art.math.rotation_matrix_to_r6d(self.data['pose_outputs'][idx])
         n_joints = len(joint_set.full)

@@ -95,12 +95,20 @@ def train():
 
     ModelClass = MODEL_REGISTRY[cfg.get('model', 'dynaip')]
     model = ModelClass(device=device).to(device)
+
+    finetune = cfg.get('pretrained') is not None
+    if finetune:
+        model.load_state_dict(torch.load(cfg['pretrained'], map_location=device, weights_only=True))
+        print(f"Loaded pretrained: {cfg['pretrained']}")
+
     train_loader, val_loader = get_dataloaders(cfg, device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg['learning_rate'])
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg['num_epochs'] // 2)
     print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}\n")
 
     output_dir = Path(cfg['output_dir']) / cfg['wandb_run_name']
+    if finetune:
+        output_dir = output_dir / 'finetune'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     best_val_loss = float('inf')
