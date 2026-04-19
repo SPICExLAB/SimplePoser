@@ -45,7 +45,7 @@ def evaluate_pose(model, dataset, num_future_frame=5):
     # load data
     xs, ys = zip(*[
         (imu.to(device), (pose_6d.to(device), tran.to(device)))
-        for imu, pose_6d, joint, tran, vel, contact in dataset
+        for imu, pose_6d, joint, tran, vel, contact, stationary, root_vel in dataset
     ])
 
     # setup Pose Evaluator

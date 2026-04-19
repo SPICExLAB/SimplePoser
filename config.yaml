@@ -2,10 +2,10 @@
 seed: 42
 
 # training
-device: cuda:0
+device: cuda:2
 batch_size: 256
-num_epochs: 180
-learning_rate: 0.001
+num_epochs: 120
+learning_rate: 0.0003
 num_workers: 0
 dropout: 0.4
 
@@ -13,6 +13,7 @@ dropout: 0.4
 dataset: Train
 target_fps: 30
 add_noise: true
+use_moda: false
 
 # output directory
 output_dir: checkpoints
@@ -29,6 +30,6 @@ use_r6d_input: false
 window_length: 300
 
 # wandb
-wandb_project: SimplePoser
-wandb_run_name: dynaip_wout_head
-wandb_group: dynaip
+wandb_project: DynaIP
+wandb_run_name: dynaip_imu2scene_finetune
+wandb_group: dynaip_imu2scene_finetune

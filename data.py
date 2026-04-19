@@ -9,6 +9,7 @@ from pathlib import Path
 
 import articulate as art
 from config import combos, paths, acc_scale, joint_set, datasets
+from simulation import simulation_MODA
 
 
 class PoseDataset(Dataset):
@@ -22,8 +23,11 @@ class PoseDataset(Dataset):
         self.combos = combos
         self.bodymodel = art.model.ParametricModel(paths.smpl_file)
 
+        self.real_imu_datasets = {'IMUPoser', 'DIP_IMU', 'IMU2Scene'}
         self.data = {
-            'imu_inputs': [],
+            'acc_inputs': [],
+            'ori_inputs': [],
+            'is_synthetic': [],
             'pose_outputs': [],
             'joint_outputs': [],
             'tran_outputs': [],
@@ -54,7 +58,7 @@ class PoseDataset(Dataset):
         for data_file in tqdm(data_files):
             file_data = torch.load(data_folder / data_file, map_location=torch.device('cpu'), weights_only=True)
             dataset_name = Path(data_file).stem
-            source_fps = datasets.get(dataset_name, {}).get('fps', self.cfg['target_fps'])
+            source_fps = datasets.get(dataset_name, {}).get('fps', 50)
             print(f"Dataset: {dataset_name} | Source FPS: {source_fps} | Target FPS: {self.cfg['target_fps']}")
             self._process_file(dataset_name, file_data, source_fps)
 
@@ -113,7 +117,7 @@ class PoseDataset(Dataset):
         for idx, (acc, ori, pose, tran, joint, foot) in pbar:
             pbar.set_postfix({'seq': idx, 'frames': len(pose)})
 
-            if self.cfg['add_noise'] and not self.evaluate and dataset_name not in ['IMUPoser', 'DIP_IMU']:
+            if self.cfg['add_noise'] and not self.evaluate and dataset_name not in ['IMUPoser', 'DIP_IMU', 'IMU2Scene']:
                 from imu_synthesis import syn_imu_from_smpl
                 acc, gyro, ori = syn_imu_from_smpl(pose, tran)
                 acc = acc.cpu()
@@ -146,117 +150,82 @@ class PoseDataset(Dataset):
             joint = joint[sample_idx]
             foot = foot[sample_idx] if foot is not None else None
 
-            self._process_data(acc, ori, pose, joint, tran, foot)
+            self._process_data(acc, ori, pose, joint, tran, foot, dataset_name)
 
-    def _process_data(self, acc, ori, pose, joint, tran, foot):
-        use_r6d = self.cfg['use_r6d_input']
+    def _process_data(self, acc, ori, pose, joint, tran, foot, dataset_name=''):
         dt = 1.0 / self.cfg['target_fps']
-
-        # compute stationary labels
         stationary, root_vel = self._compute_stationary_labels(joint, tran, dt)
 
-        for _, c in self.combos.items():
-            combo_acc = torch.zeros_like(acc)
-            combo_ori = torch.zeros_like(ori)
-            combo_acc[:, c] = acc[:, c]
-            combo_ori[:, c] = ori[:, c]
+        window = len(acc) if self.evaluate else self.cfg['window_length']
+        n_windows = len(torch.split(acc, window))
+        is_synthetic = dataset_name not in self.real_imu_datasets
 
-            if use_r6d:
-                combo_ori = art.math.rotation_matrix_to_r6d(combo_ori).view(-1, 5, 6)
+        self.data['acc_inputs'].extend(torch.split(acc, window))
+        self.data['ori_inputs'].extend(torch.split(ori, window))
+        self.data['is_synthetic'].extend([is_synthetic] * n_windows)
+        self.data['pose_outputs'].extend(torch.split(pose, window))
+        self.data['joint_outputs'].extend(torch.split(joint, window))
+        self.data['tran_outputs'].extend(torch.split(tran, window))
 
-            imu = torch.cat([combo_acc.flatten(1), combo_ori.flatten(1)], dim=1)
-            window = len(imu) if self.evaluate else self.cfg['window_length']
-
-            self.data['imu_inputs'].extend(torch.split(imu, window))
-            self.data['pose_outputs'].extend(torch.split(pose, window))
-            self.data['joint_outputs'].extend(torch.split(joint, window))
-            self.data['tran_outputs'].extend(torch.split(tran, window))
-
-            # per-joint velocities in m/s (root-relative)
-            vel = torch.zeros_like(joint)                 # [T, 24, 3]
-            vel[1:] = (joint[1:] - joint[:-1]) / dt       # m/s
-
-            if not self.evaluate:
-                self.data['vel_outputs'].extend(torch.split(vel, window))
-                self.data['foot_outputs'].extend(
-                    torch.split(foot, window) if foot is not None
-                    else [None] * len(torch.split(imu, window))
-                )
-                self.data['stationary_outputs'].extend(
-                    torch.split(stationary, window) if stationary is not None
-                    else [None] * len(torch.split(imu, window))
-                )
-                self.data['root_vel_outputs'].extend(
-                    torch.split(root_vel, window) if root_vel is not None
-                    else [None] * len(torch.split(imu, window))
-                )
-
-    # =========================================================================
-    # On-the-fly sensor masking alternative (uncomment to replace _process_data)
-    # Stores data once with all sensors; masking happens in __getitem__.
-    # Dataset is 1x instead of Nx combos — faster loading, less memory.
-    # =========================================================================
-    # def _process_data(self, acc, ori, pose, joint, tran, foot):
-    #     use_r6d = self.cfg['use_r6d_input']
-    #     dt = 1.0 / self.cfg['target_fps']
-    #     stationary, root_vel = self._compute_stationary_labels(joint, tran, dt)
-    #
-    #     # Convert ori once (no combo loop)
-    #     if use_r6d:
-    #         ori = art.math.rotation_matrix_to_r6d(ori).view(-1, 5, 6)
-    #     imu = torch.cat([acc.flatten(1), ori.flatten(1)], dim=1)
-    #     window = len(imu) if self.evaluate else self.cfg['window_length']
-    #
-    #     self.data['imu_inputs'].extend(torch.split(imu, window))
-    #     self.data['pose_outputs'].extend(torch.split(pose, window))
-    #     self.data['joint_outputs'].extend(torch.split(joint, window))
-    #     self.data['tran_outputs'].extend(torch.split(tran, window))
-    #
-    #     vel = torch.zeros_like(joint)
-    #     vel[1:] = (joint[1:] - joint[:-1]) / dt
-    #     if not self.evaluate:
-    #         self.data['vel_outputs'].extend(torch.split(vel, window))
-    #         self.data['foot_outputs'].extend(
-    #             torch.split(foot, window) if foot is not None
-    #             else [None] * len(torch.split(imu, window))
-    #         )
-    #         self.data['stationary_outputs'].extend(
-    #             torch.split(stationary, window) if stationary is not None
-    #             else [None] * len(torch.split(imu, window))
-    #         )
-    #         self.data['root_vel_outputs'].extend(
-    #             torch.split(root_vel, window) if root_vel is not None
-    #             else [None] * len(torch.split(imu, window))
-    #         )
+        vel = torch.zeros_like(joint)
+        vel[1:] = (joint[1:] - joint[:-1]) / dt
+        if not self.evaluate:
+            self.data['vel_outputs'].extend(torch.split(vel, window))
+            self.data['foot_outputs'].extend(
+                torch.split(foot, window) if foot is not None
+                else [None] * n_windows
+            )
+            self.data['stationary_outputs'].extend(
+                torch.split(stationary, window) if stationary is not None
+                else [None] * n_windows
+            )
+            self.data['root_vel_outputs'].extend(
+                torch.split(root_vel, window) if root_vel is not None
+                else [None] * n_windows
+            )
 
     def __len__(self):
-        return len(self.data['imu_inputs'])
+        return len(self.data['acc_inputs'])
 
     def __getitem__(self, idx):
-        imu = self.data['imu_inputs'][idx].float()
+        acc = self.data['acc_inputs'][idx].float()   # [T, 5, 3]
+        ori = self.data['ori_inputs'][idx].float()   # [T, 5, 3, 3]
         joint = self.data['joint_outputs'][idx].float()
         tran = self.data['tran_outputs'][idx].float()
+        T = acc.shape[0]
 
-        # --- On-the-fly sensor masking (use with the alternative _process_data above) ---
-        # if not self.evaluate:
-        #     combo = random.choice(list(combos.values()))
-        #     sensor_mask = torch.zeros(5)
-        #     sensor_mask[combo] = 1.0
-        #     ori_dim = 6 if self.cfg['use_r6d_input'] else 9
-        #     imu_mask = torch.cat([
-        #         sensor_mask.repeat_interleave(3),        # acc: 5 sensors × 3
-        #         sensor_mask.repeat_interleave(ori_dim),  # ori: 5 sensors × 6 or 9
-        #     ])
-        #     imu = imu * imu_mask
+        # --- On-the-fly MODA augmentation (synthetic/AMASS data only) ---
+        if not self.evaluate and self.cfg.get('use_moda', False) and self.data['is_synthetic'][idx]:
+            # reshape for MODA: [1, T, 5, 3, 3] and [1, T, 5, 3, 1]
+            ori_b = ori.unsqueeze(0)                          # [1, T, 5, 3, 3]
+            acc_b = acc.unsqueeze(0).unsqueeze(-1)            # [1, T, 5, 3, 1]
+            ori_b, acc_b, _ = simulation_MODA(ori_b, acc_b, imu_num=5)
+            ori = ori_b.squeeze(0)                            # [T, 5, 3, 3]
+            acc = acc_b.squeeze(0).squeeze(-1)                # [T, 5, 3]
+
+        # --- On-the-fly sensor masking ---
+        if not self.evaluate:
+            combo = random.choice(list(combos.values()))
+            sensor_mask = torch.zeros(5)
+            sensor_mask[combo] = 1.0
+            acc = acc * sensor_mask.view(1, 5, 1)
+            ori = ori * sensor_mask.view(1, 5, 1, 1)
+
+        # flatten to imu input
+        if self.cfg['use_r6d_input']:
+            ori_flat = art.math.rotation_matrix_to_r6d(ori.reshape(-1, 3, 3)).reshape(T, 5, 6)
+        else:
+            ori_flat = ori.reshape(T, 5, 9)
+        imu = torch.cat([acc.flatten(1), ori_flat.flatten(1)], dim=1)
 
         pose_6d = art.math.rotation_matrix_to_r6d(self.data['pose_outputs'][idx])
         n_joints = len(joint_set.full)
         pose_6d = pose_6d.reshape(-1, n_joints, 6)[:, joint_set.full].reshape(-1, 6 * n_joints)
 
-        vel = self.data['vel_outputs'][idx].float() if self.data['vel_outputs'] and self.data['vel_outputs'][idx] is not None else torch.zeros(imu.shape[0], 24, 3)
-        contact = self.data['foot_outputs'][idx].float() if self.data['foot_outputs'] and self.data['foot_outputs'][idx] is not None else torch.zeros(imu.shape[0], 2)
-        stationary = self.data['stationary_outputs'][idx].float() if self.data['stationary_outputs'] and self.data['stationary_outputs'][idx] is not None else torch.zeros(imu.shape[0], 5)
-        root_vel = self.data['root_vel_outputs'][idx].float() if self.data['root_vel_outputs'] and self.data['root_vel_outputs'][idx] is not None else torch.zeros(imu.shape[0], 3)
+        vel = self.data['vel_outputs'][idx].float() if self.data['vel_outputs'] and self.data['vel_outputs'][idx] is not None else torch.zeros(T, 24, 3)
+        contact = self.data['foot_outputs'][idx].float() if self.data['foot_outputs'] and self.data['foot_outputs'][idx] is not None else torch.zeros(T, 2)
+        stationary = self.data['stationary_outputs'][idx].float() if self.data['stationary_outputs'] and self.data['stationary_outputs'][idx] is not None else torch.zeros(T, 5)
+        root_vel = self.data['root_vel_outputs'][idx].float() if self.data['root_vel_outputs'] and self.data['root_vel_outputs'][idx] is not None else torch.zeros(T, 3)
 
         return imu, pose_6d, joint, tran, vel, contact, stationary, root_vel
 

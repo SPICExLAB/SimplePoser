@@ -16,7 +16,7 @@ def evaluate(model, val_loader, device, finetune=False):
     model.eval()
     total_loss = 0.0
     
-    for imu, pose_6d, joints, tran, vel, contact, lengths in tqdm(val_loader, desc='Validating'):
+    for imu, pose_6d, joints, tran, vel, contact, stationary, root_vel, lengths in tqdm(val_loader, desc='Validating'):
         imu = imu.to(device)
         pose_6d = pose_6d.to(device)
         joints = joints.to(device)
@@ -92,7 +92,7 @@ def train():
         train_loss = 0.0
         
         pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{cfg["num_epochs"]}')
-        for imu, pose_6d, joints, tran, vel, contact, lengths in pbar:
+        for imu, pose_6d, joints, tran, vel, contact, stationary, root_vel, lengths in pbar:
             # move everything to device
             imu = imu.to(device)         # [B, T, 60/45]
             joints = joints.to(device)   # [B, T, 24, 3]

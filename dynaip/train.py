@@ -101,10 +101,17 @@ def train():
         model.load_state_dict(torch.load(cfg['pretrained'], map_location=device, weights_only=True))
         print(f"Loaded pretrained: {cfg['pretrained']}")
 
+    if cfg.get('freeze_vrnet', False):
+        model.vrnet.requires_grad_(False)
+        print("Frozen: vrnet")
+
     train_loader, val_loader = get_dataloaders(cfg, device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg['learning_rate'])
+    trainable = filter(lambda p: p.requires_grad, model.parameters())
+    optimizer = torch.optim.Adam(trainable, lr=cfg['learning_rate'])
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg['num_epochs'] // 2)
-    print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}\n")
+    total_params = sum(p.numel() for p in model.parameters())
+    train_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Parameters: {train_params:,} trainable / {total_params:,} total\n")
 
     output_dir = Path(cfg['output_dir']) / cfg['wandb_run_name']
     if finetune:

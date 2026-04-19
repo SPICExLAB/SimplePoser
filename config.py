@@ -17,14 +17,17 @@ datasets = {
     'IMUPoser':     {'fps': 30},
     'TotalCapture': {'fps': 60},
     'SAMP':         {'fps': 60},
+    'IMU2Scene':    {'fps': 30},
     'Nymeria':      {'fps': 50},
+    'train':        {'fps': 30},
+    'test':        {'fps': 30},
 }
 
 
 # device-location combinations
 combos = {
-    # 'global': [0, 1, 2, 3, 4],
-    'lw_rw_lp_rp': [0, 1, 2, 3],
+    'global': [0, 1, 2, 3, 4],
+    # 'rw_lp_rp_h': [1, 2, 3, 4],
     # 'lw_rp_h': [0, 3, 4],
     # 'rw_rp_h': [1, 3, 4],
     # 'lw_lp_h': [0, 2, 4],

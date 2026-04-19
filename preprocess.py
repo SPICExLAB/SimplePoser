@@ -356,17 +356,17 @@ def process_nymeria():
         vert = torch.cat(all_vert)
         del all_grot, all_joint, all_vert
 
-        # synthesize noisy IMU signals
-        from imu_synthesis import _syn_imu, device as imu_device
-        a_sim, _, R_sim = _syn_imu(vert.to(imu_device), grot[:, ji_mask].to(imu_device))
+        # synthesize IMU signals (same as AMASS)
+        acc = _syn_acc(vert, fps=50)
+        ori = grot[:, ji_mask]
 
         data = {
             'pose': pose.clone(),                          # N, 24, 3, 3
             'shape': shape.clone(),                        # 10
             'tran': tran.clone(),                          # N, 3
             'joint': joint[:, :24].contiguous().clone(),   # N, 24, 3
-            'acc': a_sim.cpu(),                            # N, 6, 3
-            'ori': R_sim.cpu(),                            # N, 6, 3, 3
+            'acc': acc,                                    # N, 6, 3
+            'ori': ori,                                    # N, 6, 3, 3
             'contact': _foot_ground_probs(joint).clone(),  # N, 2
         }
         out_name = os.path.splitext(os.path.basename(pkl_fname))[0] + '.pt'

@@ -2,16 +2,19 @@
 seed: 42
 
 # training
-device: cuda:0
-batch_size: 32
-num_epochs: 10
-learning_rate: 0.001
+device: cuda:1
+batch_size: 64
+num_epochs: 15
+learning_rate: 0.0003
 num_workers: 0
 dropout: 0.4
 
 # data configs
-dataset: IMUPoser
-add_noise: true
+dataset: Finetune
+add_noise: false
+
+# configs
+freeze_vrnet: false
 
 # output directory
 output_dir: checkpoints
@@ -22,13 +25,13 @@ past_frames: 40
 future_frames: 5
 use_r6d_input: false
 total_frames: past_frames + future_frames
-pretrained: checkpoints/dynaip_nymeria_finetune/finetune/best.pt
+pretrained: checkpoints/dynaip/best.pt
 
 # settings
 use_global_pose: true
-window_length: 300
+window_length: 150
 
 # wandb
 wandb_project: SimplePoser
-wandb_run_name: dynaip_nymeria_finetune_imuposer
-wandb_group: dynaip
+wandb_run_name: dynaip_nymeria
+wandb_group: dynaip_nymeria
