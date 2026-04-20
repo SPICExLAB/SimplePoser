@@ -47,7 +47,7 @@ combos = {
 
 
 class paths:
-    data_dir = '/data/projects/Pose/dataset_work' # directory of processed datasets
+    data_dir = '/mnt/nas2/Vasco/dataset_work/' # directory of processed datasets
 
     raw_amass_dir = '/data/projects/Pose/raw/AMASS'      # raw AMASS dataset path (raw_amass_dir/ACCAD/ACCAD/s001/*.npz)
     amass_dir = '/data/projects/Pose/dataset_work/AMASS'              # output path for the synthetic AMASS dataset

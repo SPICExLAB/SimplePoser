@@ -1,106 +1,100 @@
 import os
-import numpy as np
 import torch
-from argparse import ArgumentParser
 import tqdm
+from argparse import ArgumentParser
 
-from config import paths, joint_set, fps
 import articulate as art
+from config import paths, joint_set, fps
 from data import PoseDataset
-from model import MobilePoser
 from utils import load_yaml
+from mobileposer import MobilePoser
+from dynaip import DynaIP
+
+
+MODEL_REGISTRY = {
+    'mobileposer': MobilePoser,
+    'dynaip': DynaIP,
+}
 
 
 class PoseEvaluator:
     def __init__(self, device='cpu'):
-        self._eval_fn = art.FullMotionEvaluator(paths.smpl_file, joint_mask=torch.tensor([2, 5, 16, 20], device=device), fps=fps, device=device)
+        self._eval_fn = art.FullMotionEvaluator(
+            paths.smpl_file, joint_mask=torch.tensor([2, 5, 16, 20], device=device),
+            fps=fps, device=device,
+        )
 
     def eval(self, pose_p, pose_t, tran_p=None, tran_t=None):
         pose_p = pose_p.clone().view(-1, 24, 3, 3)
         pose_t = pose_t.clone().view(-1, 24, 3, 3)
-        tran_p = tran_p.clone().view(-1, 3)
-        tran_t = tran_t.clone().view(-1, 3)
-
         pose_p[:, joint_set.ignored] = torch.eye(3, device=pose_p.device)
         pose_t[:, joint_set.ignored] = torch.eye(3, device=pose_t.device)
 
-        errs = self._eval_fn(pose_p, pose_t, tran_p=tran_p, tran_t=tran_t)
-        return torch.stack([errs[9], errs[3], errs[9], errs[0]*100, errs[7]*100, errs[1]*100, errs[4] / 100, errs[6]])
+        if tran_p is not None and tran_t is not None:
+            tran_p = tran_p.clone().view(-1, 3)
+            tran_t = tran_t.clone().view(-1, 3)
+            errs = self._eval_fn(pose_p, pose_t, tran_p=tran_p, tran_t=tran_t)
+            return torch.stack([errs[9], errs[3], errs[9], errs[0]*100, errs[7]*100, errs[1]*100, errs[4] / 100, errs[6]])
+        errs = self._eval_fn(pose_p, pose_t)
+        return torch.stack([errs[9], errs[3], errs[9], errs[0]*100, errs[7]*100, errs[1]*100, errs[4] / 100])
 
     @staticmethod
-    def print(errors):
-        for i, name in enumerate([
-            'SIP Error (deg)', 'Angular Error (deg)', 'Masked Angular Error (deg)',
-            'Positional Error (cm)', 'Masked Positional Error (cm)', 'Mesh Error (cm)',
-            'Jitter Error (100m/s^3)', 'Distance Error (cm)'
-        ]):
+    def print(errors, with_tran=True):
+        names = ['SIP Error (deg)', 'Angular Error (deg)', 'Masked Angular Error (deg)',
+                 'Positional Error (cm)', 'Masked Positional Error (cm)', 'Mesh Error (cm)',
+                 'Jitter Error (100m/s^3)']
+        if with_tran:
+            names.append('Distance Error (cm)')
+        for i, name in enumerate(names):
             print('%s: %.2f (+/- %.2f)' % (name, errors[i, 0], errors[i, 1]))
 
 
+def _predict(model, imu):
+    """Model-specific inference. Returns (pose [T,24,3,3], tran [T,3] or None)."""
+    if isinstance(model, MobilePoser):
+        pose, _, tran, _ = model.forward_offline(imu.unsqueeze(0))
+        return pose, tran
+    if isinstance(model, DynaIP):
+        pose, tran, _ = model.predict(imu.unsqueeze(0))
+        return pose, tran
+    raise ValueError(f"Unsupported model type: {type(model).__name__}")
+
+
 @torch.no_grad()
-def evaluate_pose(model, dataset, num_future_frame=5):
-    # specify device
+def evaluate_pose(model, dataset, cfg):
     device = cfg['device']
-
-    # load data
-    xs, ys = zip(*[
-        (imu.to(device), (pose_6d.to(device), tran.to(device)))
-        for imu, pose_6d, joint, tran, vel, contact, stationary, root_vel in dataset
-    ])
-
-    # setup Pose Evaluator
     evaluator = PoseEvaluator(device=device)
-
-    # track errors
-    offline_errs, online_errs = [], []
+    errs = []
 
     model.eval()
-    with torch.no_grad():
-        for x, y in tqdm.tqdm(list(zip(xs, ys))):
-            model.reset()
+    for imu, pose_6d, joint, tran_t, vel, contact, stationary, root_vel in tqdm.tqdm(dataset):
+        imu = imu.to(device)
+        pose_t = art.math.r6d_to_rotation_matrix(pose_6d.to(device))
+        tran_t = tran_t.to(device)
 
-            # offline
-            pose_p_offline, joint_p_offline, tran_p_offline, _ = model.forward_offline(x.unsqueeze(0))
+        pose_p, tran_p = _predict(model, imu)
+        errs.append(evaluator.eval(pose_p, pose_t, tran_p=tran_p, tran_t=tran_t))
 
-            pose_t_6d, tran_t = y
-            pose_t = art.math.r6d_to_rotation_matrix(pose_t_6d)
-
-            # online
-            if os.getenv("ONLINE"):
-                online_results = [model.forward_online(f) for f in torch.cat((x, x[-1].repeat(num_future_frame, 1)))]
-                pose_p_online, joint_p_online, tran_p_online, _ = [torch.stack(_)[num_future_frame:] for _ in zip(*online_results)]
-
-            # store errors
-            offline_errs.append(evaluator.eval(pose_p_offline, pose_t, tran_p=tran_p_offline, tran_t=tran_t))
-
-            if os.getenv("ONLINE"):
-                online_errs.append(
-                    evaluator.eval(pose_p_online, pose_t, tran_p=tran_p_online, tran_t=tran_t)
-                )
-
-    # print joint errors
-    print('============== offline ================')
-    evaluator.print(torch.stack(offline_errs).mean(dim=0))
-
-    if os.getenv("ONLINE"):
-        print('============== online ================')
-        evaluator.print(torch.stack(online_errs).mean(dim=0))
+    print('============== average =================')
+    evaluator.print(torch.stack(errs).mean(dim=0), with_tran=True)
 
 
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--weights', type=str, required=True)
-    parser.add_argument('--dataset', type=str, default='test')
+    parser.add_argument('--config', type=str, default='evaluate.yaml')
     args = parser.parse_args()
 
-    # load cfg
-    cfg = load_yaml('evaluate.yaml')
+    cfg = load_yaml(args.config)
+    device = cfg['device']
 
-    # load model
-    model = MobilePoser.from_pretrained(cfg, args.weights).to(cfg['device'])
+    ModelClass = MODEL_REGISTRY[cfg.get('model', 'dynaip')]
+    model = ModelClass(cfg).to(device)
+    checkpoint = torch.load(args.weights, map_location=device, weights_only=True)
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
 
-    # load dataset
     dataset = PoseDataset(cfg, fold='test', evaluate=True)
-
-    # evaluate
-    evaluate_pose(model, dataset)
+    evaluate_pose(model, dataset, cfg)

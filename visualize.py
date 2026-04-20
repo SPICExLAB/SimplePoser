@@ -8,7 +8,7 @@ from config import paths
 import os
 
 import articulate as art
-from model import MobilePoser
+from mobileposer import MobilePoser
 from config import combos, acc_scale
 from utils import load_yaml
 

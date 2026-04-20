@@ -9,7 +9,6 @@ from pathlib import Path
 
 import articulate as art
 from config import combos, paths, acc_scale, joint_set, datasets
-from simulation import simulation_MODA
 
 
 class PoseDataset(Dataset):
@@ -52,7 +51,6 @@ class PoseDataset(Dataset):
         else:
             data_files = self._get_data_files(data_folder)
 
-        # print(f"Loading {data_files} from {data_folder}. Number of sequences: {len(data_files)}")
         print(f"Loading {len(data_files)} sequences from {data_folder}.")
 
         for data_file in tqdm(data_files):
@@ -193,15 +191,6 @@ class PoseDataset(Dataset):
         joint = self.data['joint_outputs'][idx].float()
         tran = self.data['tran_outputs'][idx].float()
         T = acc.shape[0]
-
-        # --- On-the-fly MODA augmentation (synthetic/AMASS data only) ---
-        if not self.evaluate and self.cfg.get('use_moda', False) and self.data['is_synthetic'][idx]:
-            # reshape for MODA: [1, T, 5, 3, 3] and [1, T, 5, 3, 1]
-            ori_b = ori.unsqueeze(0)                          # [1, T, 5, 3, 3]
-            acc_b = acc.unsqueeze(0).unsqueeze(-1)            # [1, T, 5, 3, 1]
-            ori_b, acc_b, _ = simulation_MODA(ori_b, acc_b, imu_num=5)
-            ori = ori_b.squeeze(0)                            # [T, 5, 3, 3]
-            acc = acc_b.squeeze(0).squeeze(-1)                # [T, 5, 3]
 
         # --- On-the-fly sensor masking ---
         if not self.evaluate:

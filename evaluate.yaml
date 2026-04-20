@@ -18,7 +18,7 @@ add_noise: false
 output_dir: checkpoints
 
 # model config
-model: simpleposer
+model: mobileposer
 past_frames: 40
 future_frames: 5
 total_frames: past_frames + future_frames
