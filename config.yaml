@@ -4,7 +4,7 @@ seed: 42
 # training
 device: cuda:1
 batch_size: 256
-num_epochs: 150
+num_epochs: 200
 learning_rate: 0.0003
 num_workers: 0
 dropout: 0.4
@@ -31,5 +31,5 @@ window_length: 300
 
 # wandb
 wandb_project: DynaIP
-wandb_run_name: dynaip_imu2scene_150
-wandb_group: dynaip_imu2scene_150
+wandb_run_name: dynaip_imu2scene_jesse_200
+wandb_group: dynaip_imu2scene_jesse_200

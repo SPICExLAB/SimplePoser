@@ -65,7 +65,7 @@ def train():
 
     train_loader, val_loader = get_dataloaders(cfg, device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg['learning_rate'])
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, cfg['num_epochs'] // 2))
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg['num_epochs'])
 
     print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}\n")
 
