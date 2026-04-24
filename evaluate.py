@@ -9,11 +9,13 @@ from data import PoseDataset
 from utils import load_yaml
 from mobileposer import MobilePoser
 from dynaip import DynaIP
+from tcnposer import TCNPoser
 
 
 MODEL_REGISTRY = {
     'mobileposer': MobilePoser,
     'dynaip': DynaIP,
+    'tcnposer': TCNPoser,
 }
 
 

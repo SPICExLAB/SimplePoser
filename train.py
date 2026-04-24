@@ -9,11 +9,13 @@ from data import get_dataloaders
 from utils import load_yaml, set_seed
 from mobileposer import MobilePoser
 from dynaip import DynaIP
+from tcnposer import TCNPoser
 
 
 MODEL_REGISTRY = {
     'mobileposer': MobilePoser,
     'dynaip': DynaIP,
+    'tcnposer': TCNPoser,
 }
 
 
