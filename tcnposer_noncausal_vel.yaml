@@ -1,0 +1,41 @@
+# reproducibility
+seed: 42
+
+# training
+device: cuda:0
+batch_size: 256
+num_epochs: 200
+learning_rate: 0.0003
+num_workers: 0
+dropout: 0.4
+
+# data configs
+dataset: Train
+target_fps: 30
+add_noise: true
+use_moda: false
+
+# output directory
+output_dir: checkpoints
+
+# model config
+model: tcnposer
+hidden_main: 96
+blocks_main: 6             # RF = 253 frames (~8.4 s @ 30 Hz)
+hidden_contact: 32
+blocks_contact: 3
+velocity_causal: false     # non-causal: velocity head can use future context (offline only)
+
+past_frames: 40
+future_frames: 5
+total_frames: past_frames + future_frames
+
+# settings
+use_global_pose: true
+use_r6d_input: false
+window_length: 300
+
+# wandb
+wandb_project: DynaIP
+wandb_run_name: tcnposer_h96_b6_noncausalvel
+wandb_group: tcnposer

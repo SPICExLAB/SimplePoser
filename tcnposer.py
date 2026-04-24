@@ -104,12 +104,16 @@ class FootContact(nn.Module):
 
 
 class Velocity(nn.Module):
-    """IMU + joints -> per-joint velocity (causal, mirrors the unidirectional LSTM)."""
-    def __init__(self, hidden=96, blocks=4):
+    """IMU + joints -> per-joint velocity.
+
+    causal=True (default) mirrors MobilePoser's unidirectional LSTM — for
+    streaming use. causal=False uses symmetric padding for stronger offline
+    velocity estimation (central-difference context)."""
+    def __init__(self, hidden=96, blocks=4, causal=True):
         super().__init__()
         self.rnn = TCN(joint_set.n_full * 3 + joint_set.n_imu,
                        joint_set.n_full * 3, hidden, n_blocks=blocks,
-                       bidirectional=False)
+                       bidirectional=not causal)
         self.rnn_state = None
 
     def forward(self, x):
@@ -136,17 +140,21 @@ class TCNPoser(MobilePoser):
       (128, 4) ->  ~488 KB int8, RF = 61 frames
       (512, 4) ->  ~6.4 MB int8, capacity-matched to MobilePoser"""
     def __init__(self, cfg, hidden_main=None, blocks_main=None,
-                 hidden_contact=None, blocks_contact=None):
+                 hidden_contact=None, blocks_contact=None,
+                 velocity_causal=None):
         super().__init__(cfg)
         hidden_main = cfg.get('hidden_main', hidden_main) if hidden_main is None else hidden_main
         blocks_main = cfg.get('blocks_main', blocks_main) if blocks_main is None else blocks_main
         hidden_contact = cfg.get('hidden_contact', hidden_contact) if hidden_contact is None else hidden_contact
         blocks_contact = cfg.get('blocks_contact', blocks_contact) if blocks_contact is None else blocks_contact
+        velocity_causal = cfg.get('velocity_causal', velocity_causal) if velocity_causal is None else velocity_causal
         hidden_main = hidden_main or 96
         blocks_main = blocks_main or 4
         hidden_contact = hidden_contact or 32
         blocks_contact = blocks_contact or 3
+        if velocity_causal is None:
+            velocity_causal = True
         self.joints = Joints(hidden_main, blocks_main)
         self.pose = Poser(hidden_main, blocks_main)
         self.foot_contact = FootContact(hidden_contact, blocks_contact)
-        self.velocity = Velocity(hidden_main, blocks_main)
+        self.velocity = Velocity(hidden_main, blocks_main, causal=velocity_causal)

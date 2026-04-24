@@ -54,6 +54,9 @@ def main():
     parser.add_argument('--tcn-weights', default='checkpoints/tcnposer_h96_b6/best.pt')
     parser.add_argument('--tcn-hidden', type=int, default=96)
     parser.add_argument('--tcn-blocks', type=int, default=6)
+    parser.add_argument('--tcn-contact-hidden', type=int, default=32)
+    parser.add_argument('--tcn-contact-blocks', type=int, default=3)
+    parser.add_argument('--tcn-velocity-causal', type=lambda s: s.lower() == 'true', default=True)
     parser.add_argument('--tcn-label', default=None)
     parser.add_argument('--dynaip-weights', default='checkpoints/dynaip_imu2scene_jesse/best.pt')
     args = parser.parse_args()
@@ -70,7 +73,9 @@ def main():
     tcn_label = args.tcn_label or f'TCNPoser (H={args.tcn_hidden}, {args.tcn_blocks} blocks)'
     runs = [
         (tcn_label,         'tcnposer', args.tcn_weights,
-         {'hidden_main': args.tcn_hidden, 'blocks_main': args.tcn_blocks}),
+         {'hidden_main': args.tcn_hidden, 'blocks_main': args.tcn_blocks,
+          'hidden_contact': args.tcn_contact_hidden, 'blocks_contact': args.tcn_contact_blocks,
+          'velocity_causal': args.tcn_velocity_causal}),
         ('DynaIP (jesse)',  'dynaip',   args.dynaip_weights, None),
     ]
 

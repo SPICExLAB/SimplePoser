@@ -1,0 +1,40 @@
+# reproducibility
+seed: 42
+
+# training
+device: cuda:1
+batch_size: 128          # TCN activations scale with T*H*B; halved from 256 to fit H=512
+num_epochs: 200
+learning_rate: 0.0003
+num_workers: 0
+dropout: 0.4
+
+# data configs
+dataset: Train
+target_fps: 30
+add_noise: true
+use_moda: false
+
+# output directory
+output_dir: checkpoints
+
+# model config
+model: tcnposer
+hidden_main: 512         # capacity-matched to MobilePoser (~6.74M params, 6.43 MB int8)
+blocks_main: 4
+hidden_contact: 96
+blocks_contact: 3
+
+past_frames: 40
+future_frames: 5
+total_frames: past_frames + future_frames
+
+# settings
+use_global_pose: true
+use_r6d_input: false
+window_length: 300
+
+# wandb
+wandb_project: DynaIP
+wandb_run_name: tcnposer_h512_b4
+wandb_group: tcnposer
